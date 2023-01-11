@@ -1,0 +1,34 @@
+From: Stefano Rivera <stefanor@debian.org>
+Date: Sat, 5 Nov 2022 17:46:58 +0200
+Subject: Import setuptools before distutils
+
+Setuptools 60 bundles distutils and installs its own version into
+sys.path. Make sure this happens before any other distutils imports.
+
+Forwarded: not-needed, upstream has stripped their setup.py down
+Bug-Debian: https://bugs.debian.org/1022430
+---
+ setup.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/setup.py b/setup.py
+index 118e8a5..7cacc9c 100755
+--- a/setup.py
++++ b/setup.py
+@@ -1,5 +1,7 @@
+ #!/usr/bin/env python
+ 
++import setuptools
++
+ from distutils.core import setup
+ import distutils.core
+ from distutils.command import build, install_data
+@@ -7,8 +9,6 @@ import gzip
+ import os.path
+ import sys
+ 
+-import setuptools
+-
+ import osc.core
+ from osc import commandline
+ 

@@ -1,5 +1,725 @@
-template-repository (1.0-1) unstable; urgency=medium
+osc (0.169.1-2) unstable; urgency=medium
 
-  * Initial release
+  * Don’t check compatibility with IPv4-only M2Crypto versions.
+    This makes osc compatible with Python 3.11.
 
- -- Tsic404 <liuheng@deepin.org>  Sat, 28 Jan 2023 13:46:49 +0800
+ -- Andrej Shadura <andrewsh@debian.org>  Wed, 11 Jan 2023 10:44:26 +0100
+
+osc (0.169.1-1.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Patch: Support setuptools 60. (Closes: #1022430)
+
+ -- Stefano Rivera <stefanor@debian.org>  Sat, 05 Nov 2022 18:02:07 +0200
+
+osc (0.169.1-1) unstable; urgency=high
+
+  * New upstream release (Closes: #969999, CVE-2019-3681)
+
+ -- Andrej Shadura <andrewsh@debian.org>  Sat, 09 Jan 2021 10:08:08 +0100
+
+osc (0.168.2-2) unstable; urgency=medium
+
+  * Trim trailing whitespace.
+  * Use secure URI in debian/watch.
+  * Bump debhelper from old 12 to 13.
+  * Update standards version to 4.5.0, no changes needed.
+  * Add the missing python3-m2crypto dependency (Closes: #947547).
+  * Install the fish completion file.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Wed, 30 Sep 2020 11:18:24 +0200
+
+osc (0.168.2-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 13 Apr 2020 13:58:11 +0200
+
+osc (0.167.1-1) unstable; urgency=medium
+
+  * New upstream release.
+  * New maintainer.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 23 Dec 2019 13:54:47 +0100
+
+osc (0.165.4-1) unstable; urgency=medium
+
+  * QA upload.
+  * New upstream release
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 19 Dec 2019 18:05:37 +0000
+
+osc (0.164.2-2) unstable; urgency=medium
+
+  * QA upload.
+  * Switch to python3. Closes: #830873, #937218
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 19 Dec 2019 17:18:03 +0000
+
+osc (0.164.2-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Bump standards to 4.3.0.
+
+ -- Michal Čihař <nijel@debian.org>  Sun, 17 Feb 2019 09:14:59 +0100
+
+osc (0.163.0-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Bump standards to 4.2.1.
+  * d/copyright: Use https protocol in Format field
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 18 Oct 2018 10:03:31 +0200
+
+osc (0.162.1-3) unstable; urgency=medium
+
+  * Use team address on tracker.debian.org as maintainer (Closes:
+    #899630).
+  * Move Vcs URLs to Salsa.
+  * Bump standards to 4.1.4.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 31 May 2018 13:12:24 +0200
+
+osc (0.162.1-2) unstable; urgency=medium
+
+  * Incorporate NMU changes (Closes: #898963).
+  * Remove constraint on historical Python version.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 24 May 2018 08:44:29 +0200
+
+osc (0.162.1-1.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Merge Build-Depends-Indep into Build-Depends. The python2 and
+    bash-completion debhelper sequences are needed for the clean target
+    when building a source package, but that target is only guaranteed to
+    have the Build-Depends available; and python-urlgrabber turns out to
+    also be needed during clean, because it's indirectly imported
+    by setup.py. (Closes: #898775)
+  * d/p/Disable-ssl-session-resumption.patch:
+    Add patch from upstream fixing a segfault when used with
+    libssl1.1 (>= 1.1.0h) (Closes: #895035)
+
+ -- Simon McVittie <smcv@debian.org>  Thu, 17 May 2018 21:48:13 +0100
+
+osc (0.162.1-1) unstable; urgency=medium
+
+  * New upstream release.
+    - Contains osc part of hardening for CVE-2017-9274 (Closes: #887391).
+  * Bump standards to 4.1.3.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 23 Jan 2018 09:47:02 +0100
+
+osc (0.161.1-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Fri, 17 Nov 2017 15:59:43 +0100
+
+osc (0.160.0-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Bump standards to 4.1.1.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 02 Oct 2017 08:21:37 +0200
+
+osc (0.159.0-1) unstable; urgency=medium
+
+  * New upstream release.
+    - All patches integrated upstream.
+  * Change priority to optional.
+  * Bump standards to 4.0.1.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 07 Aug 2017 10:42:53 -0400
+
+osc (0.158.0-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Do not sugest (deprecated) python-gnomekeyring. There is support
+    for python-keyring already which is preferred upstream
+    (Closes: #844158).
+  * Bump standards to 4.0.0.
+  * Apply upstream patch to work with both osc-build and build
+    (Closes: #867680).
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 10 Jul 2017 20:14:52 +0200
+
+osc (0.156.0-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Use HTTPS in the Vcs-* fields, and use the cgit frontend instead of
+    gitweb
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 21 Dec 2016 09:48:46 +0100
+
+osc (0.155.1-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 20 Sep 2016 13:28:13 +0200
+
+osc (0.155.0-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 01 Aug 2016 11:45:18 +0200
+
+osc (0.154.0-4) unstable; urgency=medium
+
+  * Adjust package description (it's Open Build Service for ages).
+  * Update Maintainer, Uploaders and VCS for pkg-rpm team.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 27 Jul 2016 12:53:25 +0200
+
+osc (0.154.0-3) unstable; urgency=medium
+
+  * Add patch to make build reproducible (Closes: #826093).
+  * Make python-rpm dependency optional, it's not needed anymore when
+    not manipulating with rpm packages (Closes: #828999).
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 07 Jul 2016 11:37:19 +0200
+
+osc (0.154.0-2) unstable; urgency=medium
+
+  * Install bash completion (Closes: #824583).
+  * Install tcsh completion.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 18 May 2016 13:09:19 +0200
+
+osc (0.154.0-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Bump standards to 3.9.8.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 12 May 2016 09:23:25 +0200
+
+osc (0.152.0-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 02 Jul 2015 09:44:20 +0200
+
+osc (0.151.2-2) unstable; urgency=medium
+
+  * Fix path to vc command (Closes: #785332).
+  * Update debian/copyright.
+
+ -- Michal Čihař <nijel@debian.org>  Fri, 15 May 2015 10:26:53 +0200
+
+osc (0.151.2-1) unstable; urgency=medium
+
+  * New upstream release.
+    - Shell injection patch is now upstream.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 28 Apr 2015 09:50:52 +0200
+
+osc (0.149.0-2) unstable; urgency=high
+
+  * Change default build-cmd to obs-build (Closes: #769547).
+  * Recommend obs-build.
+  * Fix shell injection (Closes: #780410, CVE-2015-0778).
+
+ -- Michal Čihař <nijel@debian.org>  Fri, 13 Mar 2015 16:32:15 +0100
+
+osc (0.149.0-1) unstable; urgency=medium
+
+  * New upstream release.
+    - All patches merged upstream.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 22 Oct 2014 09:04:16 +0200
+
+osc (0.148.2-1) unstable; urgency=medium
+
+  * New upstream version.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 14 Oct 2014 08:29:11 +0200
+
+osc (0.148.1-2) unstable; urgency=medium
+
+  * Fixed commiting new package (Closes: #762825).
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 06 Oct 2014 09:50:04 +0200
+
+osc (0.148.1-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Bump standards to 3.9.6.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 22 Sep 2014 10:40:49 +0200
+
+osc (0.147.0-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Fix Vcs-Svn URL.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 27 Aug 2014 09:43:23 +0200
+
+osc (0.146.0-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 27 May 2014 13:21:28 +0200
+
+osc (0.145.0-1) unstable; urgency=low
+
+  * New upstream release.
+  * Adjust Vcs-Svn URL.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 08 Apr 2014 15:24:47 +0200
+
+osc (0.144.1-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 03 Mar 2014 09:41:50 +0100
+
+osc (0.143.0-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 30 Jan 2014 09:34:39 +0100
+
+osc (0.142.2-1) unstable; urgency=low
+
+  * New upstream release.
+  * Bump standards to 3.9.5.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 09 Dec 2013 19:21:36 +0100
+
+osc (0.141.0-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 31 Oct 2013 09:31:02 +0100
+
+osc (0.140.1-1) unstable; urgency=low
+
+  * New upstream release.
+  * Bump standards to 3.9.4.
+  * Use debhelper 9.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 08 Jul 2013 09:50:30 +0200
+
+osc (0.139.2-1) unstable; urgency=low
+
+  [ Jakub Wilk ]
+  * Use canonical URIs for Vcs-* fields.
+
+  [ Michal Čihař ]
+  * New upstream release.
+  * Recommend python-keyring (should be now optional) (Closes: #688909,
+    LP: #995263).
+  * Depends on ca-certificates (Closes: #703982).
+  * Fixed watch file.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 07 May 2013 09:35:51 +0200
+
+osc (0.136.0-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 25 Oct 2012 13:08:20 +0200
+
+osc (0.135.1-1) unstable; urgency=low
+
+  * New upstream release.
+    - Incorporates better encoding detection (Closes: #682261).
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 11 Sep 2012 09:13:59 +0200
+
+osc (0.134.1-2) unstable; urgency=low
+
+  * Fix upstream homepage link.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 25 Jun 2012 15:00:26 +0200
+
+osc (0.134.1-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 11 Apr 2012 11:57:36 +0200
+
+osc (0.134.0-1) unstable; urgency=low
+
+  * New upstream release.
+  * Bump standards to 3.9.3.
+  * Update debian/copyright to match current specification.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 14 Mar 2012 09:26:18 +0100
+
+osc (0.133.1-1) unstable; urgency=low
+
+  * New upstream release.
+  * osc-source-validator is not needed anymore
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 02 Jan 2012 12:13:42 +0100
+
+osc (0.132.6-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 30 Aug 2011 10:26:00 +0200
+
+osc (0.132.5-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 02 Aug 2011 15:07:38 +0200
+
+osc (0.132.4-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 20 Jun 2011 13:10:39 +0200
+
+osc (0.132.3-1) unstable; urgency=low
+
+  * New upstream release.
+  * Fix watch file for new upstream location.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 13 Jun 2011 08:40:55 +0200
+
+osc (0.132.1-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 08 Jun 2011 16:18:34 +0200
+
+osc (0.132.0-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 08 Jun 2011 12:06:58 +0200
+
+osc (0.131.1-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 04 May 2011 09:49:12 +0200
+
+osc (0.131-1) unstable; urgency=low
+
+  * New upstream release.
+  * Fix output of recommended package when osc-source-validator is not
+    installed.
+  * Fix watch file.
+  * Migrate to dh_python2.
+  * Bump standards to 3.9.2.
+  * Fix typo in description.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 28 Apr 2011 11:12:30 +0200
+
+osc (0.130.1-2) unstable; urgency=low
+
+  * Recommend osc-source-validator.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 04 Jan 2011 16:42:11 +0100
+
+osc (0.130.1-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 20 Dec 2010 09:31:05 +0100
+
+osc (0.130-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 09 Dec 2010 10:28:08 +0100
+
+osc (0.129-1) unstable; urgency=low
+
+  * New upstream release.
+  * Update watch file to use build service API instead of result of build of
+    Debian package there.
+  * Bump standards to 3.9.1.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 31 Aug 2010 16:50:16 +0200
+
+osc (0.128-1) unstable; urgency=low
+
+  * New upstream release.
+    - Single patch merged upstream.
+  * Bump standards to 3.9.0.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 19 Jul 2010 11:08:24 +0200
+
+osc (0.127-1) unstable; urgency=low
+
+  * New upstream release (Closes: #585124).
+  * Update homepage URL.
+  * Use sensible-utils (Closes: #584483).
+
+ -- Michal Čihař <nijel@debian.org>  Fri, 11 Jun 2010 09:03:14 +0200
+
+osc (0.126-2) unstable; urgency=low
+
+  * Recommend rpm2cpio and cpio for osc importsrcpkg (LP: #577827).
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 10 May 2010 15:41:34 +0200
+
+osc (0.126-1) unstable; urgency=low
+
+  * New upstream version.
+  * Need to build depend on python-urlgrabber.
+
+ -- Michal Čihař <nijel@debian.org>  Fri, 23 Apr 2010 11:07:45 +0200
+
+osc (0.125.5-2) unstable; urgency=low
+
+  * Do not alternatively depend on celementtree, just depend on python >= 2.5.
+    (Change was not forwarded to debian maintainer from Ubuntu, but he rather
+    spot that when looking at package differences.)
+
+ -- Michal Čihař <nijel@debian.org>  Fri, 05 Mar 2010 10:31:08 +0100
+
+osc (0.125.5-1) unstable; urgency=low
+
+  * New upstream version.
+  * Bump standards to 3.8.4.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 11 Feb 2010 16:32:13 +0100
+
+osc (0.125.3-1) unstable; urgency=low
+
+  * New upstream version.
+  * Build depend on python, not python-dev.
+
+ -- Michal Čihař <nijel@debian.org>  Fri, 29 Jan 2010 16:13:40 +0100
+
+osc (0.124-2) unstable; urgency=low
+
+  * Do not depend directly on celementtree, prefer python => 2.5 instead
+    (Closes: #562456).
+
+ -- Michal Čihař <nijel@debian.org>  Sun, 27 Dec 2009 19:42:50 +0100
+
+osc (0.124-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 10 Dec 2009 13:56:14 +0100
+
+osc (0.123-1) unstable; urgency=low
+
+  * New upstream version.
+    - It requires python-m2crypto.
+    - All patches are upstream.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 20 Oct 2009 16:21:45 +0200
+
+osc (0.122-2) unstable; urgency=low
+
+  * Simplify debian rules by using dh.
+  * Use quilt patch system.
+    - Fix not escaped ' in man page.
+    - Fix compilation with Python 2.4.
+    - Fix non escaped - in man page.
+
+ -- Michal Čihař <nijel@debian.org>  Fri, 25 Sep 2009 14:38:26 +0200
+
+osc (0.122-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 21 Sep 2009 14:28:50 +0200
+
+osc (0.121.1-1) unstable; urgency=low
+
+  * New upstream release.
+  * Update standards to 3.8.3.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 03 Sep 2009 11:35:49 +0200
+
+osc (0.120-1) unstable; urgency=low
+
+  * New upstream release.
+    - Fixes compatibility with Python 2.4.
+    - Fixes some errors in man page.
+  * Update standards to 3.8.2.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 23 Jun 2009 12:03:14 +0200
+
+osc (0.119-1) unstable; urgency=low
+
+  * New upstream release.
+  * Drop patches merged upstream, no need for quilt anymore.
+  * Man page is now generated upstream.
+  * Add gnome-keyring suggests as osc can now use it.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 16 Jun 2009 15:21:09 +0200
+
+osc (0.117-2) unstable; urgency=low
+
+  * Rediff existing patch.
+  * Fix syntax error with with Python 2.4.
+  * Add rlog support for srcmd5.
+  * Patch help output to be parsable by help2man.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 05 May 2009 14:15:45 +0200
+
+osc (0.117-1) unstable; urgency=low
+
+  * New upstream version.
+  * Change watch file to use tarballs now exported by buildservice.
+  * Update README.source:
+    - Mention quilt (it replaced dpatch in 0.114-1).
+    - No need to extract sources from rpm.
+  * Updated man page.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 05 May 2009 12:28:35 +0200
+
+osc (0.116-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 16 Apr 2009 11:05:37 +0200
+
+osc (0.115-1) unstable; urgency=low
+
+  * New upstream version.
+  * Update standards to 3.8.1 (no changes needed).
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 18 Mar 2009 08:37:40 +0100
+
+osc (0.114-1) unstable; urgency=low
+
+  * New upstream version.
+  * Update man page.
+  * Switch to quilt from dpatch.
+  * Update documentation list to match current state.
+  * Update debian/copyright to machine readable.
+  * Use override_dh instead of parameters to dh in debian/rules.
+  * Switch to python-support.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 05 Mar 2009 16:35:46 +0100
+
+osc (0.113-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 26 Jan 2009 09:13:58 +0100
+
+osc (0.112-1) unstable; urgency=low
+
+  * New upstream release.
+  * Update debian/copyright.
+  * Improve extended description.
+
+ -- Michal Čihař <nijel@debian.org>  Thu, 22 Jan 2009 17:47:31 +0100
+
+osc (0.111-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 01 Dec 2008 09:09:13 +0100
+
+osc (0.110-1) unstable; urgency=low
+
+  [ Michal Čihař ]
+  * New upstream version.
+
+  [ Sandro Tosi ]
+  * debian/control
+    - switch Vcs-Browser field to viewsvn
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 24 Nov 2008 16:18:25 +0100
+
+osc (0.109-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 08 Oct 2008 15:18:43 +0200
+
+osc (0.108-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 17 Sep 2008 12:36:13 +0200
+
+osc (0.107-2) unstable; urgency=low
+
+  * Add missing dependency on python-rpm.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 22 Jul 2008 16:34:57 +0200
+
+osc (0.107-1) unstable; urgency=low
+
+  * New upstream version.
+  * Split long line in debian/copyright.
+  * Update README.source to match current versioning and patch system.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 22 Jul 2008 10:31:56 +0200
+
+osc (0.106-1) unstable; urgency=low
+
+  * New upstream version.
+    - Update patch.
+  * Switch to debhelper 7.
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 14 Jul 2008 08:48:57 +0200
+
+osc (0.104-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 17 Jun 2008 20:57:00 +0200
+
+osc (0.103-1) unstable; urgency=low
+
+  * New upstream version.
+  * Update to standards 3.8.0.
+
+ -- Michal Čihař <nijel@debian.org>  Sat, 07 Jun 2008 12:18:26 +0200
+
+osc (0.102-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 04 Jun 2008 15:51:24 +0200
+
+osc (0.101-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 28 May 2008 21:46:27 +0200
+
+osc (0.100.2-1) unstable; urgency=low
+
+  * New upstream version.
+  * Document source packaging in debian/README.source.
+  * Move packaging to Python Applications Packaging Team:
+    - Change Vcs fields in debian/control.
+    - Add team to Uploaders.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 20 May 2008 17:30:41 +0200
+
+osc (0.99.13-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Michal Čihař <nijel@debian.org>  Mon, 07 Apr 2008 11:12:09 +0200
+
+osc (0.99.11-1) unstable; urgency=low
+
+  * New upstream version.
+  * Add get-orig-source target to debian/rules to extract tarball from source
+    RPM.
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 02 Apr 2008 14:11:55 +0200
+
+osc (0.99.10-1) unstable; urgency=low
+
+  * New upstream version.
+    - Upstream does not change minor version, only rpm release version on
+      tarball update, so we look at rpm release version.
+  * Drop workaround for bug #452227.
+  * Do not use unicode in man page.
+
+ -- Michal Čihař <nijel@debian.org>  Tue, 18 Mar 2008 10:19:52 +0100
+
+osc (0.99-1) unstable; urgency=low
+
+  * Initial release (Closes: #463041).
+
+ -- Michal Čihař <nijel@debian.org>  Wed, 30 Jan 2008 17:38:31 +0900

@@ -15,7 +15,6 @@ test_build:
             architectures:
               - x86_64
               - aarch64
-
   filters:
     event: pull_request
 
