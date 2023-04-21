@@ -1,0 +1,2 @@
+# bash -n is wrong here as it doesn't process shopt -s extglob
+osc: shell-script-fails-syntax-check usr/lib/osc/complete

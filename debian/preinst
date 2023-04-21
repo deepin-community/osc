@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+# Switch from pycentral to pysupport
+if [ "$1" = upgrade ] && dpkg --compare-versions "$2" lt 0.114-1 ; then
+    pycentral pkgremove osc
+fi
+
+#DEBHELPER#
+
+exit 0
