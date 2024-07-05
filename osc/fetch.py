@@ -3,73 +3,65 @@
 # and distributed under the terms of the GNU General Public Licence,
 # either version 2, or (at your option) any later version.
 
-from __future__ import print_function
 
-import sys, os
+import glob
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from urllib.request import HTTPError
 
-try:
-    from urllib.parse import quote_plus
-    from urllib.request import HTTPBasicAuthHandler, HTTPCookieProcessor, HTTPPasswordMgrWithDefaultRealm, HTTPError
-except ImportError:
-    #python 2.x
-    from urllib import quote_plus
-    from urllib2 import HTTPBasicAuthHandler, HTTPCookieProcessor, HTTPPasswordMgrWithDefaultRealm, HTTPError
-
-from .core import makeurl, streamfile, dgst
-from .grabber import OscFileGrabber, OscMirrorGroup
-from .util import packagequery, cpio
+from . import checker as osc_checker
 from . import conf
 from . import oscerr
-import tempfile
-import re
-
-from osc.util.helper import decode_it
+from .core import makeurl, dgst
+from .grabber import OscFileGrabber, OscMirrorGroup
 from .meter import create_text_meter
+from .util import packagequery, cpio
+from .util.helper import decode_it
+
 
 class Fetcher:
-    def __init__(self, cachedir='/tmp', api_host_options={}, urllist=[],
+    def __init__(self, cachedir='/tmp', urllist=None,
                  http_debug=False, cookiejar=None, offline=False,
-                 enable_cpio=True, modules=[]):
+                 enable_cpio=True, modules=None, download_api_only=False):
         # set up progress bar callback
         self.progress_obj = None
         if sys.stdout.isatty():
             self.progress_obj = create_text_meter(use_pb_fallback=False)
 
         self.cachedir = cachedir
-        self.urllist = urllist
-        self.modules = modules
+        # generic download URL lists
+        self.urllist = urllist or []
+        self.modules = modules or []
         self.http_debug = http_debug
         self.offline = offline
         self.cpio = {}
         self.enable_cpio = enable_cpio
+        self.download_api_only = download_api_only
 
-        passmgr = HTTPPasswordMgrWithDefaultRealm()
-        for host in api_host_options:
-            passmgr.add_password(None, host, api_host_options[host]['user'],
-                                 api_host_options[host]['pass'])
-        openers = (HTTPBasicAuthHandler(passmgr), )
-        if cookiejar:
-            openers += (HTTPCookieProcessor(cookiejar), )
         self.gr = OscFileGrabber(progress_obj=self.progress_obj)
 
     def __add_cpio(self, pac):
-        prpap = '%s/%s/%s/%s' % (pac.project, pac.repository, pac.repoarch, pac.repopackage)
+        prpap = f'{pac.project}/{pac.repository}/{pac.repoarch}/{pac.repopackage}'
         self.cpio.setdefault(prpap, {})[pac.repofilename] = pac
 
     def __download_cpio_archive(self, apiurl, project, repo, arch, package, **pkgs):
         if not pkgs:
             return
-        query = ['binary=%s' % quote_plus(i) for i in pkgs]
-        query.append('view=cpio')
-        for module in self.modules:
-            query.append('module=' + module)
+        query = {}
+        query["binary"] = pkgs
+        query["view"] = "cpio"
+        query["module"] = self.modules
         try:
             url = makeurl(apiurl, ['build', project, repo, arch, package], query=query)
             sys.stdout.write("preparing download ...\r")
             sys.stdout.flush()
             with tempfile.NamedTemporaryFile(prefix='osc_build_cpio') as tmparchive:
                 self.gr.urlgrab(url, filename=tmparchive.name,
-                                text='fetching packages for \'%s\'' % project)
+                                text=f'fetching packages for \'{project}\'')
                 archive = cpio.CpioRead(tmparchive.name)
                 archive.read()
                 for hdr in archive:
@@ -82,9 +74,9 @@ class Fetcher:
                         raise oscerr.APIError('CPIO archive is incomplete '
                                               '(see .errors file)')
                     if package == '_repository':
-                        n = re.sub(b'\.pkg\.tar\.(zst|.z)$', b'.arch', hdr.filename)
+                        n = re.sub(br'\.pkg\.tar\.(zst|.z)$', b'.arch', hdr.filename)
                         if n.startswith(b'container:'):
-                            n = re.sub(b'\.tar\.(zst|.z)$', b'.tar', hdr.filename)
+                            n = re.sub(br'\.tar\.(zst|.z)$', b'.tar', hdr.filename)
                             pac = pkgs[decode_it(n.rsplit(b'.', 1)[0])]
                             pac.canonname = hdr.filename
                         else:
@@ -94,15 +86,18 @@ class Fetcher:
                         pac = pkgs[decode_it(hdr.filename)]
 
                     # Extract a single file from the cpio archive
+                    fd = None
+                    tmpfile = None
                     try:
                         fd, tmpfile = tempfile.mkstemp(prefix='osc_build_file')
                         archive.copyin_file(hdr.filename,
-                                            os.path.dirname(tmpfile),
-                                            os.path.basename(tmpfile))
+                                            decode_it(os.path.dirname(tmpfile)),
+                                            decode_it(os.path.basename(tmpfile)))
                         self.move_package(tmpfile, pac.localdir, pac)
                     finally:
-                        os.close(fd)
-                        if os.path.exists(tmpfile):
+                        if fd is not None:
+                            os.close(fd)
+                        if tmpfile is not None and os.path.exists(tmpfile):
                             os.unlink(tmpfile)
 
                 for pac in pkgs.values():
@@ -119,10 +114,10 @@ class Fetcher:
                 raise oscerr.APIError('unable to fetch cpio archive: '
                                       'server always returns code 414')
             n = int(len(pkgs) / 2)
-            new_pkgs = dict([(k, pkgs[k]) for k in keys[:n]])
+            new_pkgs = {k: pkgs[k] for k in keys[:n]}
             self.__download_cpio_archive(apiurl, project, repo, arch,
                                          package, **new_pkgs)
-            new_pkgs = dict([(k, pkgs[k]) for k in keys[n:]])
+            new_pkgs = {k: pkgs[k] for k in keys[n:]}
             self.__download_cpio_archive(apiurl, project, repo, arch,
                                          package, **new_pkgs)
 
@@ -138,7 +133,7 @@ class Fetcher:
         mg = OscMirrorGroup(self.gr, pac.urllist)
 
         if self.http_debug:
-            print('\nURLs to try for package \'%s\':' % pac, file=sys.stderr)
+            print(f'\nURLs to try for package \'{pac}\':', file=sys.stderr)
             print('\n'.join(pac.urllist), file=sys.stderr)
             print(file=sys.stderr)
 
@@ -146,7 +141,7 @@ class Fetcher:
             with tempfile.NamedTemporaryFile(prefix='osc_build',
                                              delete=False) as tmpfile:
                 mg_stat = mg.urlgrab(pac.filename, filename=tmpfile.name,
-                           text='%s(%s) %s' % (prefix, pac.project, pac.filename))
+                                     text=f'{prefix}({pac.project}) {pac.filename}')
                 if mg_stat:
                     self.move_package(tmpfile.name, pac.localdir, pac)
 
@@ -166,7 +161,6 @@ class Fetcher:
                 os.unlink(tmpfile.name)
 
     def move_package(self, tmpfile, destdir, pac_obj=None):
-        import shutil
         canonname = None
         if pac_obj and pac_obj.name.startswith('container:'):
             canonname = pac_obj.canonname
@@ -200,29 +194,55 @@ class Fetcher:
                 print(e, file=sys.stderr)
                 sys.exit(1)
 
+    def _build_urllist(self, buildinfo, pac):
+        if self.download_api_only:
+            return []
+        urllist = self.urllist
+        key = f'{pac.project}/{pac.repository}'
+        project_repo_url = buildinfo.urls.get(key)
+        if project_repo_url is not None:
+            urllist = [project_repo_url]
+        return urllist
+
     def run(self, buildinfo):
+        apiurl = buildinfo.apiurl
         cached = 0
         all = len(buildinfo.deps)
         for i in buildinfo.deps:
-            i.makeurls(self.cachedir, self.urllist)
+            urllist = self._build_urllist(buildinfo, i)
+            i.makeurls(self.cachedir, urllist)
             # find container extension by looking in the cache
             if i.name.startswith('container:') and i.fullfilename.endswith('.tar.xz'):
                 for ext in ['.tar.xz', '.tar.gz', '.tar']:
                     if os.path.exists(i.fullfilename[:-7] + ext):
                         i.canonname = i.canonname[:-7] + ext
-                        i.makeurls(self.cachedir, self.urllist)
+                        i.makeurls(self.cachedir, urllist)
 
             if os.path.exists(i.fullfilename):
                 cached += 1
+                if not i.name.startswith('container:') and i.pacsuffix != 'rpm':
+                    continue
+
+                hdrmd5_is_valid = True
                 if i.hdrmd5:
-                    from .util import packagequery
                     if i.name.startswith('container:'):
                         hdrmd5 = dgst(i.fullfilename)
+                        if hdrmd5 != i.hdrmd5:
+                            hdrmd5_is_valid = False
                     else:
                         hdrmd5 = packagequery.PackageQuery.queryhdrmd5(i.fullfilename)
-                    if not hdrmd5 or hdrmd5 != i.hdrmd5:
+                        if hdrmd5 != i.hdrmd5:
+                            if conf.config["api_host_options"][apiurl]["disable_hdrmd5_check"]:
+                                print(f"Warning: Ignoring a hdrmd5 mismatch for {i.fullfilename}: {hdrmd5} (actual) != {i.hdrmd5} (expected)")
+                                hdrmd5_is_valid = True
+                            else:
+                                print(f"The file will be redownloaded from the API due to a hdrmd5 mismatch for {i.fullfilename}: {hdrmd5} (actual) != {i.hdrmd5} (expected)")
+                                hdrmd5_is_valid = False
+
+                    if not hdrmd5_is_valid:
                         os.unlink(i.fullfilename)
                         cached -= 1
+
         miss = 0
         needed = all - cached
         if all:
@@ -230,7 +250,6 @@ class Fetcher:
         print("%.1f%% cache miss. %d/%d dependencies cached.\n" % (miss, cached, all))
         done = 1
         for i in buildinfo.deps:
-            i.makeurls(self.cachedir, self.urllist)
             if not os.path.exists(i.fullfilename):
                 if self.offline:
                     raise oscerr.OscIOError(None,
@@ -238,10 +257,6 @@ class Fetcher:
                                             '--offline not possible.' %
                                             i.fullfilename)
                 self.dirSetup(i)
-                if i.hdrmd5 and self.enable_cpio:
-                    self.__add_cpio(i)
-                    done += 1
-                    continue
                 try:
                     # if there isn't a progress bar, there is no output at all
                     prefix = ''
@@ -250,6 +265,20 @@ class Fetcher:
                     else:
                         prefix = '[%d/%d] ' % (done, needed)
                     self.fetch(i, prefix=prefix)
+
+                    if not os.path.isfile(i.fullfilename):
+                        # if the file wasn't downloaded and cannot be found on disk,
+                        # mark it for downloading from the API
+                        self.__add_cpio(i)
+                    else:
+                        hdrmd5 = packagequery.PackageQuery.queryhdrmd5(i.fullfilename)
+                        if hdrmd5 != i.hdrmd5:
+                            if conf.config["api_host_options"][apiurl]["disable_hdrmd5_check"]:
+                                print(f"Warning: Ignoring a hdrmd5 mismatch for {i.fullfilename}: {hdrmd5} (actual) != {i.hdrmd5} (expected)")
+                            else:
+                                print(f"The file will be redownloaded from the API due to a hdrmd5 mismatch for {i.fullfilename}: {hdrmd5} (actual) != {i.hdrmd5} (expected)")
+                                os.unlink(i.fullfilename)
+                                self.__add_cpio(i)
 
                 except KeyboardInterrupt:
                     print('Cancelled by user (ctrl-c)')
@@ -260,49 +289,47 @@ class Fetcher:
         self.__fetch_cpio(buildinfo.apiurl)
 
         prjs = list(buildinfo.projects.keys())
-        for i in prjs:
-            dest = "%s/%s" % (self.cachedir, i)
-            if not os.path.exists(dest):
-                os.makedirs(dest, mode=0o755)
-            dest += '/_pubkey'
+        for prj in prjs:
+            dest = os.path.join(self.cachedir, prj)
+            pubkey_path_base = os.path.join(dest, "_pubkey")
+            pubkey_paths = glob.glob(f"{pubkey_path_base}*")
 
-            url = makeurl(buildinfo.apiurl, ['source', i, '_pubkey'])
-            try_parent = False
+            if self.offline:
+                # we're offline, only index the keys found on disk
+                if pubkey_paths:
+                    for pubkey_path in pubkey_paths:
+                        buildinfo.keys.append(pubkey_path)
+                    buildinfo.prjkeys.append(prj)
+                continue
+
+            from . import obs_api
+
+            os.makedirs(dest, mode=0o755, exist_ok=True)
+            pubkeys = []
+
             try:
-                if self.offline and not os.path.exists(dest):
-                    # may need to try parent
-                    try_parent = True
-                elif not self.offline:
-                    OscFileGrabber().urlgrab(url, dest)
-                # not that many keys usually
-                if i not in buildinfo.prjkeys and not try_parent:
-                    buildinfo.keys.append(dest)
-                    buildinfo.prjkeys.append(i)
-            except KeyboardInterrupt:
-                print('Cancelled by user (ctrl-c)')
-                print('Exiting.')
-                if os.path.exists(dest):
-                    os.unlink(dest)
-                sys.exit(0)
+                keyinfo = obs_api.Keyinfo.from_api(buildinfo.apiurl, prj)
+                for pubkey in keyinfo.pubkey_list or []:
+                    pubkeys.append(pubkey.value)
             except HTTPError as e:
-                # Not found is okay, let's go to the next project
-                if e.code != 404:
-                    print("Invalid answer from server", e, file=sys.stderr)
-                    sys.exit(1)
-                try_parent = True
+                result = obs_api.Keyinfo.get_pubkey_deprecated(buildinfo.apiurl, prj, traverse=True)
+                if result:
+                    # overwrite ``prj`` with the project that contains the key we're using
+                    prj, pubkey = result
+                    pubkeys.append(pubkey)
 
-            if try_parent:
-                if self.http_debug:
-                    print("can't fetch key for %s" % (i), file=sys.stderr)
-                    print("url: %s" % url, file=sys.stderr)
+            # remove the existing files, we'll create new files with new contents
+            for pubkey_path in pubkey_paths:
+                os.unlink(pubkey_path)
 
-                if os.path.exists(dest):
-                    os.unlink(dest)
-
-                l = i.rsplit(':', 1)
-                # try key from parent project
-                if len(l) > 1 and l[1] and not l[0] in buildinfo.projects:
-                    prjs.append(l[0])
+            if pubkeys:
+                for num, pubkey in enumerate(pubkeys):
+                    pubkey_path = f"{pubkey_path_base}-{num}"
+                    with open(pubkey_path, "w") as f:
+                        f.write(pubkey)
+                    buildinfo.keys.append(pubkey_path)
+                if prj not in buildinfo.prjkeys:
+                    buildinfo.prjkeys.append(prj)
 
 
 def verify_pacs_old(pac_list):
@@ -313,8 +340,6 @@ def verify_pacs_old(pac_list):
        Check all packages in one go, since this takes only 6 seconds on my Athlon 700
        instead of 20 when calling 'rpm -K' for each of them.
        """
-    import subprocess
-
     if not pac_list:
         return
 
@@ -363,7 +388,7 @@ def verify_pacs_old(pac_list):
 
 - You may use --no-verify to skip the verification (which is a risk for your system).
 """ % {'name': missing_key,
-       'dir': os.path.expanduser('~')}, file=sys.stderr)
+                    'dir': os.path.expanduser('~')}, file=sys.stderr)
 
             else:
                 print("""
@@ -392,9 +417,8 @@ def verify_pacs(bi):
 
     print("using keys from", ', '.join(bi.prjkeys))
 
-    from . import checker
     failed = False
-    checker = checker.Checker()
+    checker = osc_checker.Checker()
     try:
         checker.readkeys(bi.keys)
         for pkg in pac_list:

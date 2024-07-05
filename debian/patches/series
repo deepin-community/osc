@@ -1,2 +1,2 @@
-setuptools-60.patch
-python-3.11.patch
+0001-Fix-mv-command-when-renaming-a-file-multiple-times.patch
+0002-Fix-insecure-extraction-of-ar-and-cpio-archives-by-f.patch

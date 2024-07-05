@@ -1,14 +1,19 @@
-import osc.core
-import osc.oscerr
 import os
 import sys
-from common import OscTestCase
+import unittest
 
-FIXTURES_DIR = os.path.join(os.getcwd(), 'addfile_fixtures')
+import osc.core
+import osc.oscerr
+
+from .common import OscTestCase
+
+
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'addfile_fixtures')
+
 
 def suite():
-    import unittest
-    return unittest.makeSuite(TestAddFiles)
+    return unittest.defaultTestLoader.loadTestsFromTestCase(TestAddFiles)
+
 
 class TestAddFiles(OscTestCase):
     def _get_fixtures_dir(self):
@@ -63,12 +68,12 @@ class TestAddFiles(OscTestCase):
         """replace a deleted file ('foo')"""
         self._change_to_pkg('simple')
         p = osc.core.Package('.')
-        open('foo', 'w').write('replaced file\n')
+        with open('foo', 'w') as f:
+            f.write('replaced file\n')
         p.addfile('foo')
         exp = 'A    foo\n'
         self.assertEqual(sys.stdout.getvalue(), exp)
-        self.assertTrue(os.path.exists(os.path.join('.osc', 'foo')))
-        self.assertNotEqual(open(os.path.join('.osc', 'foo'), 'r').read(), 'replaced file\n')
+        self.assertFileContentNotEqual(os.path.join('.osc', 'foo'), 'replaced file\n')
         self.assertFalse(os.path.exists(os.path.join('.osc', '_to_be_deleted')))
         self._check_status(p, 'foo', 'R')
         self._check_addlist('foo\n')
@@ -80,6 +85,6 @@ class TestAddFiles(OscTestCase):
         self.assertRaises(osc.oscerr.OscIOError, p.addfile, 'doesnotexist')
         self.assertFalse(os.path.exists(os.path.join('.osc', '_to_be_added')))
 
+
 if __name__ == '__main__':
-    import unittest
     unittest.main()

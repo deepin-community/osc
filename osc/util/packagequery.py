@@ -1,13 +1,16 @@
+import sys
 
-from __future__ import print_function
-from osc.util.helper import decode_it
+from .helper import decode_it
+
 
 class PackageError(Exception):
     """base class for all package related errors"""
+
     def __init__(self, fname, msg):
-        Exception.__init__(self)
+        super().__init__()
         self.fname = fname
         self.msg = msg
+
 
 class PackageQueries(dict):
     """Dict of package name keys and package query values.  When assigning a
@@ -20,13 +23,13 @@ class PackageQueries(dict):
 
     def __init__(self, wanted_architecture):
         self.wanted_architecture = wanted_architecture
-        super(PackageQueries, self).__init__()
+        super().__init__()
 
     def add(self, query):
         """Adds package query to dict if it is of the correct architecture and
         is newer (has a greater version) than the currently assigned package.
 
-        @param a PackageQuery
+        :param query: a PackageQuery
         """
         self.__setitem__(query.name(), query)
 
@@ -39,16 +42,18 @@ class PackageQueries(dict):
 
         if (architecture in [self.wanted_architecture, 'noarch', 'all', 'any']
             or self.wanted_architecture in self.architectureMap.get(architecture,
-                                                                [])):
+                                                                    [])):
             current_query = self.get(name)
 
             # if current query does not exist or is older than this new query
             if current_query is None or current_query.vercmp(query) <= 0:
-                super(PackageQueries, self).__setitem__(name, query)
+                super().__setitem__(name, query)
+
 
 class PackageQuery:
     """abstract base class for all package types"""
-    def read(self, all_tags = False, *extra_tags):
+
+    def read(self, all_tags=False, *extra_tags):
         """Returns a PackageQueryResult instance"""
         raise NotImplementedError
 
@@ -69,6 +74,9 @@ class PackageQuery:
             from . import debquery
             pkgquery = debquery.DebQuery(f)
             extra_tags = extra_debtags
+        elif magic == b'<update':
+            f.close()
+            return None
         elif magic[:5] == b'<?xml':
             f.close()
             return None
@@ -87,7 +95,7 @@ class PackageQuery:
         f = open(filename, 'rb')
         magic = f.read(7)
         f.seek(0)
-        if magic[:4] == '\xed\xab\xee\xdb':
+        if magic[:4] == b'\xed\xab\xee\xdb':
             from . import rpmquery
             f.close()
             return rpmquery.RpmQuery.queryhdrmd5(filename)
@@ -96,6 +104,7 @@ class PackageQuery:
 
 class PackageQueryResult:
     """abstract base class that represents the result of a package query"""
+
     def name(self):
         raise NotImplementedError
 
@@ -158,8 +167,8 @@ class PackageQueryResult:
 
         epoch = self.epoch()
         if epoch is not None and epoch != 0:
-            evr = epoch + b":" + evr 
-        return evr 
+            evr = epoch + b":" + evr
+        return evr
 
 
 def cmp(a, b):
@@ -167,7 +176,6 @@ def cmp(a, b):
 
 
 if __name__ == '__main__':
-    import sys
     try:
         pkgq = PackageQuery.query(sys.argv[1])
     except PackageError as e:

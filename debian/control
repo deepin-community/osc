@@ -8,19 +8,23 @@ Build-Depends: bash-completion,
                dh-exec,
                dh-python,
                python3,
+               python3-cryptography,
                python3-setuptools,
-               python3-m2crypto,
+               python3-urllib3,
+               diffstat <!nocheck>,
 Standards-Version: 4.5.0
 Vcs-Browser: https://salsa.debian.org/pkg-rpm-team/osc
 Vcs-Git: https://salsa.debian.org/pkg-rpm-team/osc.git
 Homepage: http://en.opensuse.org/openSUSE:OSC
+Rules-Requires-Root: no
 
 Package: osc
 Architecture: all
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          ${python3:Depends},
-         python3-m2crypto,
+         python3-cryptography,
+         python3-urllib3,
          ca-certificates
 Recommends: python3-rpm,
             rpm2cpio,

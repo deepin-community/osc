@@ -1,13 +1,19 @@
-import osc.core
-import osc.oscerr
 import os
 import sys
-from common import GET, OscTestCase
-FIXTURES_DIR = os.path.join(os.getcwd(), 'update_fixtures')
+import unittest
+
+import osc.core
+import osc.oscerr
+
+from .common import GET, OscTestCase
+
+
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'update_fixtures')
+
 
 def suite():
-    import unittest
-    return unittest.makeSuite(TestUpdate)
+    return unittest.defaultTestLoader.loadTestsFromTestCase(TestUpdate)
+
 
 class TestUpdate(OscTestCase):
     def _get_fixtures_dir(self):
@@ -58,7 +64,7 @@ class TestUpdate(OscTestCase):
     @GET('http://localhost/source/osctest/simple/_meta', file='meta.xml')
     def testUpdateUpstreamModifiedFile(self):
         """a file was modified in the remote package (local file isn't modified)"""
-        
+
         self._change_to_pkg('simple')
         osc.core.Package('.').update(rev=2)
         exp = 'U    foo\nAt revision 2.\n'
@@ -111,7 +117,7 @@ class TestUpdate(OscTestCase):
         self.assertEqual(sys.stdout.getvalue(), exp)
         self._check_deletelist('foo\n')
         self._check_conflictlist('merge\n')
-        self.assertEqual(open('foo', 'r').read(), open(os.path.join('.osc', 'foo'), 'r').read())
+        self.assertFilesEqual('foo', os.path.join('.osc', 'foo'))
         self._check_digests('testUpdateLocalDeletions_files')
 
     @GET('http://localhost/source/osctest/restore?rev=latest', file='testUpdateRestore_files')
@@ -187,8 +193,8 @@ class TestUpdate(OscTestCase):
 
     @GET('http://localhost/source/osctest/services?rev=latest', file='testUpdateServiceFilesAddDelete_filesremote')
     @GET('http://localhost/source/osctest/services/bigfile?rev=2', file='testUpdateServiceFilesAddDelete_bigfile')
-    @GET('http://localhost/source/osctest/services/_service%3Abar?rev=2', file='testUpdateServiceFilesAddDelete__service:bar')
-    @GET('http://localhost/source/osctest/services/_service%3Afoo?rev=2', file='testUpdateServiceFilesAddDelete__service:foo')
+    @GET('http://localhost/source/osctest/services/_service:bar?rev=2', file='testUpdateServiceFilesAddDelete__service:bar')
+    @GET('http://localhost/source/osctest/services/_service:foo?rev=2', file='testUpdateServiceFilesAddDelete__service:foo')
     @GET('http://localhost/source/osctest/services/_meta', file='meta.xml')
     def testUpdateAddDeleteServiceFiles(self):
         """update package with _service:* files"""
@@ -197,11 +203,9 @@ class TestUpdate(OscTestCase):
         exp = 'A    bigfile\nD    _service:exists\nA    _service:bar\nA    _service:foo\nAt revision 2.\n'
         self.assertEqual(sys.stdout.getvalue(), exp)
         self.assertFalse(os.path.exists(os.path.join('.osc', '_service:bar')))
-        self.assertTrue(os.path.exists('_service:bar'))
-        self.assertEqual(open('_service:bar').read(), 'another service\n')
+        self.assertFileContentEqual('_service:bar', 'another service\n')
         self.assertFalse(os.path.exists(os.path.join('.osc', '_service:foo')))
-        self.assertTrue(os.path.exists('_service:foo'))
-        self.assertEqual(open('_service:foo').read(), 'small\n')
+        self.assertFileContentEqual('_service:foo', 'small\n')
         self.assertTrue(os.path.exists('_service:exists'))
         self._check_digests('testUpdateServiceFilesAddDelete_files', '_service:foo', '_service:bar')
 
@@ -283,6 +287,6 @@ class TestUpdate(OscTestCase):
         self.assertFalse(os.path.exists(os.path.join('.osc', 'added')))
         self._check_digests('testUpdateResumeDeletedFile_files')
 
+
 if __name__ == '__main__':
-    import unittest
     unittest.main()

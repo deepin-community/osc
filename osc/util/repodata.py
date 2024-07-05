@@ -1,37 +1,35 @@
 """Module for reading repodata directory (created with createrepo) for package
 information instead of scanning individual rpms."""
 
-# standard modules
+
 import gzip
-import os.path
+import os
+from xml.etree import ElementTree as ET
 
-# cElementTree can be standard or 3rd-party depending on python version
-try:
-    from xml.etree import cElementTree as ET
-except ImportError:
-    import cElementTree as ET
+from . import rpmquery
+from . import packagequery
 
-# project modules
-import osc.util.rpmquery
-import osc.util.packagequery
 
 def namespace(name):
     return "{http://linux.duke.edu/metadata/%s}" % name
 
+
 OPERATOR_BY_FLAGS = {
-    "EQ" : "=",
-    "LE" : "<=",
-    "GE" : ">=",
-    "LT" : "<",
-    "GT" : ">"
+    "EQ": "=",
+    "LE": "<=",
+    "GE": ">=",
+    "LT": "<",
+    "GT": ">"
 }
+
 
 def primaryPath(directory):
     """Returns path to the primary repository data file.
 
-    @param directory repository directory that contains the repodata subdirectory
-    @return str path to primary repository data file
-    @raise IOError if repomd.xml contains no primary location
+    :param directory: repository directory that contains the repodata subdirectory
+    :return:  path to primary repository data file
+    :rtype: str
+    :raise IOError: if repomd.xml contains no primary location
     """
     metaDataPath = os.path.join(directory, "repodata", "repomd.xml")
     elementTree = ET.parse(metaDataPath)
@@ -45,18 +43,18 @@ def primaryPath(directory):
             primaryPath = os.path.join(directory, locationElement.get("href"))
             break
     else:
-        raise IOError("'%s' contains no primary location" % metaDataPath)
+        raise OSError("'%s' contains no primary location" % metaDataPath)
 
     return primaryPath
+
 
 def queries(directory):
     """Returns a list of RepoDataQueries constructed from the repodata under
     the directory.
 
-    @param directory path to a repository directory (parent directory of
-                     repodata directory)
-    @return list of RepoDataQueryResult instances
-    @raise IOError if repomd.xml contains no primary location
+    :param directory: path to a repository directory (parent directory of repodata directory)
+    :return: list of RepoDataQueryResult instances
+    :raise IOError: if repomd.xml contains no primary location
     """
     path = primaryPath(directory)
 
@@ -90,16 +88,15 @@ def _to_bytes_list(method):
     return _method
 
 
-class RepoDataQueryResult(osc.util.packagequery.PackageQueryResult):
+class RepoDataQueryResult(packagequery.PackageQueryResult):
     """PackageQueryResult that reads in data from the repodata directory files."""
 
     def __init__(self, directory, element):
         """Creates a RepoDataQueryResult from the a package Element under a metadata
         Element in a primary.xml file.
 
-        @param directory repository directory path.  Used to convert relative
-                         paths to full paths.
-        @param element package Element
+        :param directory: repository directory path. Used to convert relative paths to full paths.
+        :param element: package Element
         """
         self.__directory = os.path.abspath(directory)
         self.__element = element
@@ -128,8 +125,7 @@ class RepoDataQueryResult(osc.util.packagequery.PackageQueryResult):
 
         entries = []
         if collectionElement is not None:
-            for entryElement in collectionElement.findall(namespace("rpm") +
-                                                          "entry"):
+            for entryElement in collectionElement.findall(namespace("rpm") + "entry"):
                 entry = self.__parseEntry(entryElement)
                 entries.append(entry)
 
@@ -205,8 +201,7 @@ class RepoDataQueryResult(osc.util.packagequery.PackageQueryResult):
             release = None
         else:
             release = self.release()
-        return osc.util.rpmquery.RpmQuery.filename(self.name(), None,
-            self.version(), release, self.arch())
+        return rpmquery.RpmQuery.filename(self.name(), None, self.version(), release, self.arch())
 
     def gettag(self, tag):
         # implement me, if needed
@@ -216,13 +211,13 @@ class RepoDataQueryResult(osc.util.packagequery.PackageQueryResult):
         # if either self.epoch() or other.epoch() is None, the vercmp will do
         # the correct thing because one is transformed into b'None' and the
         # other one into b"b'<epoch>'" (and 'b' is greater than 'N')
-        res = osc.util.rpmquery.RpmQuery.rpmvercmp(str(self.epoch()).encode(), str(other.epoch()).encode())
+        res = rpmquery.RpmQuery.rpmvercmp(str(self.epoch()).encode(), str(other.epoch()).encode())
         if res != 0:
             return res
-        res = osc.util.rpmquery.RpmQuery.rpmvercmp(self.version(), other.version())
+        res = rpmquery.RpmQuery.rpmvercmp(self.version(), other.version())
         if res != 0:
             return res
-        res = osc.util.rpmquery.RpmQuery.rpmvercmp(self.release(), other.release())
+        res = rpmquery.RpmQuery.rpmvercmp(self.release(), other.release())
         return res
 
     @_to_bytes_or_None

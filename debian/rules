@@ -10,7 +10,15 @@ override_dh_clean:
 	# Exclude testsuite data
 	dh_clean --exclude=foo.orig
 
+execute_after_dh_auto_build:
+	for d in .pybuild/*/build; do ln -sr doc $$d; done
+
+ifneq ($(FAKEROOTKEY),)
+override_dh_auto_test:
+	LD_PRELOAD= dh_auto_test
+endif
+
 override_dh_auto_install:
 	dh_auto_install
 	# Give the binary sane name
-	mv $(CURDIR)/debian/osc/usr/bin/osc-wrapper.py $(CURDIR)/debian/osc/usr/bin/osc
+	# mv $(CURDIR)/debian/osc/usr/bin/osc-wrapper.py $(CURDIR)/debian/osc/usr/bin/osc

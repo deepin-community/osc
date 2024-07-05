@@ -1,3 +1,38 @@
+osc (1.7.0-3) experimental; urgency=medium
+
+  [ Dylan Aïssi ]
+  * Update Build-Deps.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Tue, 18 Jun 2024 10:50:20 +0200
+
+osc (1.7.0-2) experimental; urgency=medium
+
+  * Apply patches from the upstream:
+    - Fix 'mv' command when renaming a file multiple times
+    - Fix insecure extraction of 'ar' and 'cpio' archives by
+      forbidding extracting files with absolute paths.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 03 Jun 2024 11:35:46 +0200
+
+osc (1.7.0-1) experimental; urgency=medium
+
+  * New upstream release.
+  * Add Rules-Requires-Root: no.
+  * Prevent tests from running as fakeroot.
+  * Drop no longer necessary patches.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 03 Jun 2024 10:43:44 +0200
+
+osc (0.182.1-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Refresh patches.
+  * Install README from the new location.
+  * Install fish completions to vendor_completions.d.
+  * Add a missing dependency for tests.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 06 May 2024 13:39:36 +0200
+
 osc (0.169.1-2) unstable; urgency=medium
 
   * Don’t check compatibility with IPv4-only M2Crypto versions.

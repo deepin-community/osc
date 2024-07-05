@@ -1,26 +1,32 @@
+import os
+import unittest
+from xml.etree import ElementTree as ET
+
 import osc.core
 import osc.oscerr
-import os
-from common import OscTestCase
 
-FIXTURES_DIR = os.path.join(os.getcwd(), 'request_fixtures')
+from .common import OscTestCase
+
+
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'request_fixtures')
+
 
 def suite():
-    import unittest
-    return unittest.makeSuite(TestRequest)
+    return unittest.defaultTestLoader.loadTestsFromTestCase(TestRequest)
+
 
 class TestRequest(OscTestCase):
     def _get_fixtures_dir(self):
         return FIXTURES_DIR
 
     def setUp(self):
-        OscTestCase.setUp(self, copytree=False)
+        super().setUp(copytree=False)
 
     def test_createsr(self):
         """create a simple submitrequest"""
         r = osc.core.Request()
         r.add_action('submit', src_project='foo', src_package='bar', src_rev='42',
-            tgt_project='foobar', tgt_package='bar')
+                     tgt_project='foobar', tgt_package='bar')
         self.assertEqual(r.actions[0].type, 'submit')
         self.assertEqual(r.actions[0].src_project, 'foo')
         self.assertEqual(r.actions[0].src_package, 'bar')
@@ -38,14 +44,14 @@ class TestRequest(OscTestCase):
     <target package="bar" project="foobar" />
   </action>
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_createsr_with_option(self):
         """create a submitrequest with option"""
         """create a simple submitrequest"""
         r = osc.core.Request()
         r.add_action('submit', src_project='foo', src_package='bar',
-            tgt_project='foobar', tgt_package='bar', opt_sourceupdate='cleanup', opt_updatelink='1')
+                     tgt_project='foobar', tgt_package='bar', opt_sourceupdate='cleanup', opt_updatelink='1')
         self.assertEqual(r.actions[0].type, 'submit')
         self.assertEqual(r.actions[0].src_project, 'foo')
         self.assertEqual(r.actions[0].src_package, 'bar')
@@ -67,13 +73,13 @@ class TestRequest(OscTestCase):
     </options>
   </action>
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_createsr_missing_tgt_package(self):
         """create a submitrequest with missing target package"""
         r = osc.core.Request()
         r.add_action('submit', src_project='foo', src_package='bar',
-            tgt_project='foobar')
+                     tgt_project='foobar')
         self.assertEqual(r.actions[0].type, 'submit')
         self.assertEqual(r.actions[0].src_project, 'foo')
         self.assertEqual(r.actions[0].src_package, 'bar')
@@ -88,7 +94,7 @@ class TestRequest(OscTestCase):
     <target project="foobar" />
   </action>
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_createsr_invalid_argument(self):
         """create a submitrequest with invalid action argument"""
@@ -117,7 +123,7 @@ class TestRequest(OscTestCase):
     <person name="user" role="reader" />
   </action>
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_create_add_role_group(self):
         """create an add_role request (group element)"""
@@ -138,13 +144,13 @@ class TestRequest(OscTestCase):
     <group name="group" role="reviewer" />
   </action>
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_create_add_role_person_group(self):
         """create an add_role request (person+group element)"""
         r = osc.core.Request()
         r.add_action('add_role', tgt_project='foo', tgt_package='bar', person_name='user', person_role='reader',
-            group_name='group', group_role='reviewer')
+                     group_name='group', group_role='reviewer')
         self.assertEqual(r.actions[0].type, 'add_role')
         self.assertEqual(r.actions[0].tgt_project, 'foo')
         self.assertEqual(r.actions[0].tgt_package, 'bar')
@@ -161,7 +167,7 @@ class TestRequest(OscTestCase):
     <group name="group" role="reviewer" />
   </action>
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_create_set_bugowner_project(self):
         """create a set_bugowner request for a project"""
@@ -179,7 +185,7 @@ class TestRequest(OscTestCase):
     <person name="buguser" />
   </action>
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_create_set_bugowner_package(self):
         """create a set_bugowner request for a package"""
@@ -197,7 +203,7 @@ class TestRequest(OscTestCase):
     <person name="buguser" />
   </action>
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_create_delete_project(self):
         """create a delete request for a project"""
@@ -213,7 +219,7 @@ class TestRequest(OscTestCase):
     <target project="foo" />
   </action>
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_create_delete_package(self):
         """create a delete request for a package"""
@@ -229,7 +235,7 @@ class TestRequest(OscTestCase):
     <target package="deleteme" project="foo" />
   </action>
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_create_change_devel(self):
         """create a change devel request"""
@@ -248,11 +254,10 @@ class TestRequest(OscTestCase):
     <target package="devpkg" project="devprj" />
   </action>
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_action_from_xml1(self):
         """create action from xml"""
-        from xml.etree import cElementTree as ET
         xml = """<action type="add_role">
   <target package="bar" project="foo" />
   <person name="user" role="reader" />
@@ -266,11 +271,10 @@ class TestRequest(OscTestCase):
         self.assertEqual(action.person_role, 'reader')
         self.assertEqual(action.group_name, 'group')
         self.assertEqual(action.group_role, 'reviewer')
-        self.assertEqual(xml, action.to_str())
+        self.assertXMLEqual(xml, action.to_str())
 
     def test_action_from_xml2(self):
         """create action from xml"""
-        from xml.etree import cElementTree as ET
         xml = """<action type="submit">
   <source package="bar" project="foo" />
   <target package="bar" project="foobar" />
@@ -288,11 +292,10 @@ class TestRequest(OscTestCase):
         self.assertEqual(action.opt_sourceupdate, 'cleanup')
         self.assertEqual(action.opt_updatelink, '1')
         self.assertTrue(action.src_rev is None)
-        self.assertEqual(xml, action.to_str())
+        self.assertXMLEqual(xml, action.to_str())
 
     def test_action_from_xml3(self):
         """create action from xml (with acceptinfo element)"""
-        from xml.etree import cElementTree as ET
         xml = """<action type="submit">
   <source package="bar" project="testprj" />
   <target package="baz" project="foobar" />
@@ -312,18 +315,16 @@ class TestRequest(OscTestCase):
         self.assertEqual(action.acceptinfo_xsrcmd5, 'ffffffffffffffffffffffffffffffff')
         self.assertTrue(action.acceptinfo_osrcmd5 is None)
         self.assertTrue(action.acceptinfo_oxsrcmd5 is None)
-        self.assertEqual(xml, action.to_str())
+        self.assertXMLEqual(xml, action.to_str())
 
     def test_action_from_xml_unknown_type(self):
         """try to create action from xml with unknown type"""
-        from xml.etree import cElementTree as ET
         xml = '<action type="foo"><source package="bar" project="foo" /></action>'
         self.assertRaises(osc.oscerr.WrongArgs, osc.core.Action.from_xml, ET.fromstring(xml))
 
     def test_read_request1(self):
         """read in a request"""
-        from xml.etree import cElementTree as ET
-        xml = open(os.path.join(self._get_fixtures_dir(), 'test_read_request1.xml'), 'r').read().strip()
+        xml = self._get_fixture('test_read_request1.xml')
         r = osc.core.Request()
         r.read(ET.fromstring(xml))
         self.assertEqual(r.reqid, '42')
@@ -350,12 +351,11 @@ class TestRequest(OscTestCase):
         self.assertEqual(r.description, 'this is a\nvery long\ndescription')
         self.assertTrue(len(r.statehistory) == 1)
         self.assertTrue(len(r.reviews) == 0)
-        self.assertEqual(xml, r.to_str())
+        self.assertXMLEqual(xml, r.to_str())
 
     def test_read_request2(self):
         """read in a request (with reviews)"""
-        from xml.etree import cElementTree as ET
-        xml = open(os.path.join(self._get_fixtures_dir(), 'test_read_request2.xml'), 'r').read().strip()
+        xml = self._get_fixture('test_read_request2.xml')
         r = osc.core.Request()
         r.read(ET.fromstring(xml))
         self.assertEqual(r.reqid, '123')
@@ -389,11 +389,10 @@ class TestRequest(OscTestCase):
         self.assertEqual(r.creator, 'creator')
         self.assertTrue(len(r.statehistory) == 1)
         self.assertTrue(len(r.reviews) == 1)
-        self.assertEqual(xml, r.to_str())
+        self.assertXMLEqual(xml, r.to_str())
 
     def test_read_request3(self):
         """read in a request (with an "empty" comment+description)"""
-        from xml.etree import cElementTree as ET
         xml = """<request creator="xyz" id="2">
   <action type="set_bugowner">
     <target project="foo" />
@@ -426,14 +425,14 @@ class TestRequest(OscTestCase):
   <state name="new" when="2010-12-28T12:36:29" who="xyz" />
 </request>"""
 
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_request_list_view1(self):
         """test the list_view method"""
-        from xml.etree import cElementTree as ET
-        xml = open(os.path.join(self._get_fixtures_dir(), 'test_request_list_view1.xml'), 'r').read().strip()
+        xml = self._get_fixture('test_request_list_view1.xml')
         exp = """\
     62  State:new        By:Admin        When:2010-12-29T14:57:25
+        Created by: Admin
         set_bugowner:    buguser                                            foo
         add_role:        person: xyz as maintainer, group: group1 as reader foobar
         add_role:        person: abc as reviewer                            foo/bar
@@ -448,12 +447,12 @@ class TestRequest(OscTestCase):
 
     def test_request_list_view2(self):
         """test the list_view method (with history elements and description)"""
-        from xml.etree import cElementTree as ET
-        xml = open(os.path.join(self._get_fixtures_dir(), 'test_request_list_view2.xml'), 'r').read().strip()
+        xml = self._get_fixture('test_request_list_view2.xml')
         r = osc.core.Request()
         r.read(ET.fromstring(xml))
         exp = """\
     21  State:accepted   By:foobar       When:2010-12-29T16:37:45
+        Created by: foobar
         set_bugowner:    buguser                                            foo
         From: Created Request: user -> Review Approved: foobar
         Descr: This is a simple request with a lot of ... ... text and other
@@ -462,41 +461,43 @@ class TestRequest(OscTestCase):
         self.assertEqual(exp, r.list_view())
 
     def test_request_str1(self):
-        from xml.etree import cElementTree as ET
         """test the __str__ method"""
-        xml = open(os.path.join(self._get_fixtures_dir(), 'test_request_str1.xml'), 'r').read().strip()
+        xml = self._get_fixture('test_request_str1.xml')
         r = osc.core.Request()
         r = osc.core.Request()
         r.read(ET.fromstring(xml))
         self.assertEqual(r.creator, 'creator')
         exp = """\
-Request: #123
+Request:    123
+Created by: creator
 
+Actions:
   submit:       xyz/abc(cleanup) -> foo ***update link***
   add_role:     person: bar as maintainer, group: groupxyz as reader home:foo
 
-
 Message:
-just a samll description
-in order to describe this
-request - blablabla
-test.
+  just a samll description
+  in order to describe this
+  request - blablabla
+  test.
 
-State:   review     2010-12-27T01:36:29 abc
-Comment: currently in review
+State:
+  review                                                        2010-12-27T01:36:29 abc
+    | currently in review
 
-Review:  accepted   Group: group1                                      2010-12-29T00:11:22 abc                   
-  accepted
-         new        Group: group1                                      2010-12-28T00:11:22 abc                   
-  review start
+Review:
+  accepted   Group: group1                                      2010-12-29T00:11:22 abc
+    | accepted
+  new        Group: group1                                      2010-12-28T00:11:22 abc
+    | review start
 
-History: 2010-12-12T00:00:00 creator      revoked
-         2010-12-11T00:00:00 creator      new"""
+History:
+  2010-12-12T00:00:00 creator                        revoked
+  2010-12-11T00:00:00 creator                        new"""
         self.assertEqual(exp, str(r))
 
     def test_request_str2(self):
         """test the __str__ method"""
-        from xml.etree import cElementTree as ET
         xml = """\
 <request creator="creator" id="98765">
   <action type="change_devel">
@@ -512,22 +513,22 @@ History: 2010-12-12T00:00:00 creator      revoked
         r.read(ET.fromstring(xml))
         self.assertEqual(r.creator, 'creator')
         exp = """\
-Request: #98765
+Request:    98765
+Created by: creator
 
+Actions:
   change_devel: foo/bar developed in devprj/devpkg
   delete:       deleteme
 
-
 Message:
-<no message>
+  <no message>
 
-State:   new        2010-12-29T00:11:22 creator
-Comment: <no comment>"""
+State:
+  new                                                           2010-12-29T00:11:22 creator"""
         self.assertEqual(exp, str(r))
 
     def test_legacy_request(self):
         """load old-style submitrequest"""
-        from xml.etree import cElementTree as ET
         xml = """\
 <request creator="olduser" id="1234" type="submit">
   <submit>
@@ -559,12 +560,11 @@ Comment: <no comment>"""
   </action>
   <state name="new" when="2010-12-30T02:11:22" who="olduser" />
 </request>"""
-        self.assertEqual(exp, r.to_str())
+        self.assertXMLEqual(exp, r.to_str())
 
     def test_get_actions(self):
         """test get_actions method"""
-        from xml.etree import cElementTree as ET
-        xml = open(os.path.join(self._get_fixtures_dir(), 'test_request_list_view1.xml'), 'r').read().strip()
+        xml = self._get_fixture('test_request_list_view1.xml')
         r = osc.core.Request()
         r.read(ET.fromstring(xml))
         sr_actions = r.get_actions('submit')
@@ -574,6 +574,6 @@ Comment: <no comment>"""
         self.assertTrue(len(r.get_actions('submit', 'delete', 'change_devel')) == 5)
         self.assertTrue(len(r.get_actions()) == 8)
 
+
 if __name__ == '__main__':
-    import unittest
     unittest.main()

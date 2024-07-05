@@ -1,0 +1,24 @@
+From: Daniel Mach <daniel.mach@suse.com>
+Date: Mon, 27 May 2024 07:52:35 +0200
+Subject: Fix 'mv' command when renaming a file multiple times
+
+Origin: upstream, https://github.com/openSUSE/osc/pull/1570
+---
+ osc/commandline.py | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/osc/commandline.py b/osc/commandline.py
+index 0938417..6412bfc 100644
+--- a/osc/commandline.py
++++ b/osc/commandline.py
+@@ -9887,6 +9887,10 @@ Please submit there instead, or use --nodevelproject to force direct submission.
+         except oscerr.PackageFileConflict:
+             # file is already tracked
+             pass
++
++        # instantiate src_pkg *again* to load fresh state from .osc that was written on deleting a file in tgt_pkg
++        # it would be way better to use a single Package instance where possible
++        src_pkg = Package(source)
+         src_pkg.delete_file(os.path.basename(source), force=opts.force)
+ 
+     @cmdln.option('-d', '--delete', action='store_true',

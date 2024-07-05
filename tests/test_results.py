@@ -1,15 +1,19 @@
-import osc.commandline
-from common import GET, OscTestCase
 import os
 import sys
+import unittest
+
+import osc.commandline
+
+from .common import GET, OscTestCase
+
 
 def suite():
-    import unittest
-    return unittest.makeSuite(TestResults)
+    return unittest.defaultTestLoader.loadTestsFromTestCase(TestResults)
+
 
 class TestResults(OscTestCase):
     def setUp(self):
-        OscTestCase.setUp(self, copytree=False)
+        super().setUp(copytree=False)
 
     def _get_fixtures_name(self):
         return 'results_fixtures'
@@ -20,24 +24,21 @@ class TestResults(OscTestCase):
     def _run_osc(self, *args):
         """Runs osc, returning captured STDOUT as a string."""
         cli = osc.commandline.Osc()
-        argv = ['osc', '--no-keyring', '--no-gnome-keyring']
+        argv = ['osc', '--no-keyring']
         argv.extend(args)
         cli.main(argv=argv)
         return sys.stdout.getvalue()
 
-    def _get_fixture(self, filename):
-        return open(os.path.join(self._get_fixtures_dir(), filename), 'r').read()
-
     @GET('http://localhost/build/testproject/_result', file='result.xml')
     def testPrjresults(self):
         out = self._run_osc('prjresults', '--xml', 'testproject')
-        self.assertEqualMultiline(out, self._get_fixture('result.xml')+'\n')
+        self.assertEqualMultiline(out, self._get_fixture('result.xml') + '\n')
 
     @GET('http://localhost/build/testproject/_result', file='result-dirty.xml')
     @GET('http://localhost/build/testproject/_result?oldstate=c57e2ee592dbbf26ebf19cc4f1bc1e83', file='result.xml')
     def testPrjresultsWatch(self):
         out = self._run_osc('prjresults', '--watch', '--xml', 'testproject')
-        self.assertEqualMultiline(out, self._get_fixture('result-dirty.xml')+'\n'+self._get_fixture('result.xml')+'\n')
+        self.assertEqualMultiline(out, self._get_fixture('result-dirty.xml') + '\n' + self._get_fixture('result.xml') + '\n')
 
     @GET('http://localhost/build/testproject/_result?package=python-MarkupSafe&multibuild=1&locallink=1', file='result.xml')
     def testResults(self):
@@ -48,9 +49,8 @@ class TestResults(OscTestCase):
     @GET('http://localhost/build/testproject/_result?package=python-MarkupSafe&oldstate=c57e2ee592dbbf26ebf19cc4f1bc1e83&multibuild=1&locallink=1', file='result.xml')
     def testResultsWatch(self):
         out = self._run_osc('results', '--watch', '--xml', 'testproject', 'python-MarkupSafe')
-        self.assertEqualMultiline(out, self._get_fixture('result-dirty.xml')+self._get_fixture('result.xml'))
+        self.assertEqualMultiline(out, self._get_fixture('result-dirty.xml') + self._get_fixture('result.xml'))
+
 
 if __name__ == '__main__':
-    import unittest
     unittest.main()
-

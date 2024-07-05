@@ -13,13 +13,11 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 
-from __future__ import print_function
 
 import os
 import re
-import sys
 import stat
-
+import sys
 from io import BytesIO
 
 
@@ -27,18 +25,22 @@ from io import BytesIO
 if not hasattr(os, 'SEEK_SET'):
     os.SEEK_SET = 0
 
+
 class ArError(Exception):
     """Base class for all ar related errors"""
+
     def __init__(self, fn, msg):
-        Exception.__init__(self)
+        super().__init__()
         self.file = fn
         self.msg = msg
 
     def __str__(self):
         return 'ar error: %s' % self.msg
 
+
 class ArHdr:
     """Represents an ar header entry"""
+
     def __init__(self, fn, date, uid, gid, mode, size, fmag, off):
         self.file = fn.strip()
         self.date = date.strip()
@@ -56,23 +58,25 @@ class ArHdr:
     def __str__(self):
         return '%16s %d' % (self.file, self.size)
 
+
 class ArFile(BytesIO):
     """Represents a file which resides in the archive"""
+
     def __init__(self, fn, uid, gid, mode, buf):
-        BytesIO.__init__(self, buf)
+        super().__init__(buf)
         self.name = fn
         self.uid = uid
         self.gid = gid
         self.mode = mode
 
-    def saveTo(self, dir = None):
+    def saveTo(self, dir=None):
         """
         writes file to dir/filename if dir isn't specified the current
         working dir is used. Additionally it tries to set the owner/group
         and permissions.
         """
         if not dir:
-            dir = os.getcwd()
+            dir = os.getcwdb()
         fn = os.path.join(dir, self.name)
         with open(fn, 'wb') as f:
             f.write(self.getvalue())
@@ -81,13 +85,14 @@ class ArFile(BytesIO):
         if uid != os.geteuid() or os.geteuid() != 0:
             uid = -1
         gid = self.gid
-        if not gid in os.getgroups() or os.getegid() != 0:
+        if gid not in os.getgroups() or os.getegid() != 0:
             gid = -1
         os.chown(fn, uid, gid)
 
     def __str__(self):
         return '%s %s %s %s' % (self.name, self.uid,
                                 self.gid, self.mode)
+
 
 class Ar:
     """
@@ -98,10 +103,10 @@ class Ar:
     hdr_pat = re.compile(b'^(.{16})(.{12})(.{6})(.{6})(.{8})(.{10})(.{2})',
                          re.DOTALL)
 
-    def __init__(self, fn = None, fh = None):
-        if fn == None and fh == None:
-            raise ValueError('either \'fn\' or \'fh\' must be != None')
-        if fh != None:
+    def __init__(self, fn=None, fh=None):
+        if fn is None and fh is None:
+            raise ValueError('either \'fn\' or \'fh\' must be is not None')
+        if fh is not None:
             self.__file = fh
             self.__closefile = False
             self.filename = fh.name
@@ -171,7 +176,7 @@ class Ar:
         if data != b'!<arch>':
             raise ArError(self.filename, 'no ar archive')
         pos = 8
-        while (len(data) != 0):
+        while len(data) != 0:
             self.__file.seek(pos, os.SEEK_SET)
             data = self.__file.read(self.hdr_len)
             if not data:
