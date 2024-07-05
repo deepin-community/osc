@@ -5,7 +5,10 @@
 
 from __future__ import print_function
 
-__version__ = '0.169.1'
+
+from .util import git_version
+__version__ = git_version.get_version('0.182.1')
+
 
 # __store_version__ is to be incremented when the format of the working copy
 # "store" changes in an incompatible way. Please add any needed migration
@@ -33,7 +36,7 @@ except ImportError:
 
 try:
     from urllib.parse import urlsplit, urlunsplit, urlparse, quote_plus, urlencode, unquote
-    from urllib.error import HTTPError
+    from urllib.error import HTTPError, URLError
     from urllib.request import pathname2url, install_opener, urlopen
     from urllib.request import Request as URLRequest
     from io import StringIO
@@ -42,16 +45,18 @@ except ImportError:
     #python 2.x
     from urlparse import urlsplit, urlunsplit, urlparse
     from urllib import pathname2url, quote_plus, urlencode, unquote
-    from urllib2 import HTTPError, install_opener, urlopen
+    from urllib2 import HTTPError, URLError, install_opener, urlopen
     from urllib2 import Request as URLRequest
     from cStringIO import StringIO
     from httplib import IncompleteRead
 
-
 try:
+    # Works up to Python 3.8, needed for Python < 3.3 (inc 2.7)
     from xml.etree import cElementTree as ET
 except ImportError:
-    import cElementTree as ET
+    # will import a fast implementation from 3.3 onwards, needed
+    # for 3.9+
+    from xml.etree import ElementTree as ET
 
 from . import oscerr
 from . import conf
@@ -289,12 +294,12 @@ class Serviceinfo:
     def __init__(self):
         """creates an empty serviceinfo instance"""
         self.services = []
-        self.apiurl   = None
-        self.project  = None
-        self.package  = None
+        self.apiurl = None
+        self.project = None
+        self.package = None
 
     def read(self, serviceinfo_node, append=False):
-        """read in the source services <services> element passed as
+        """read in the source services ``<services>`` element passed as
         elementtree node.
         """
         def error(msg, xml):
@@ -314,7 +319,7 @@ class Serviceinfo:
             if len(name) < 3 or '/' in name:
                 error("invalid service name: %s" % name, service)
             mode = service.get('mode', '')
-            data = { 'name' : name, 'mode' : mode }
+            data = {'name': name, 'mode': mode}
             command = [ name ]
             for param in service.findall('param'):
                 option = param.get('name')
@@ -357,7 +362,7 @@ class Serviceinfo:
         r = serviceinfo_node
         s = ET.Element( "service", name="verify_file" )
         ET.SubElement(s, "param", name="file").text = filename
-        ET.SubElement(s, "param", name="verifier").text  = "sha256"
+        ET.SubElement(s, "param", name="verifier").text = "sha256"
         ET.SubElement(s, "param", name="checksum").text = digest
 
         r.append( s )
@@ -373,10 +378,10 @@ class Serviceinfo:
         r = serviceinfo_node
         s = ET.Element( "service", name="download_url" )
         ET.SubElement(s, "param", name="protocol").text = protocol
-        ET.SubElement(s, "param", name="host").text     = host
-        ET.SubElement(s, "param", name="path").text     = path
+        ET.SubElement(s, "param", name="host").text = host
+        ET.SubElement(s, "param", name="path").text = path
 
-        r.append( s )
+        r.append(s)
         return r
 
     def addSetVersion(self, serviceinfo_node):
@@ -408,22 +413,36 @@ class Serviceinfo:
         return r
 
     def execute(self, dir, callmode = None, singleservice = None, verbose = None):
+        old_dir = os.path.join(dir, '.old')
+        if os.path.exists(old_dir) or os.path.islink(old_dir):
+            msg = '"%s" exists, please remove it' % old_dir
+            raise oscerr.OscIOError(None, msg)
+        try:
+            os.mkdir(old_dir)
+            return self._execute(dir, old_dir, callmode, singleservice,
+                                 verbose)
+        finally:
+            if os.path.exists(old_dir):
+                shutil.rmtree(old_dir)
+
+    def _execute(self, dir, old_dir, callmode=None, singleservice=None,
+                 verbose=None):
         import tempfile
 
         # cleanup existing generated files
         for filename in os.listdir(dir):
             if filename.startswith('_service:') or filename.startswith('_service_'):
-                ent = os.path.join(dir, filename)
-                if os.path.isdir(ent):
-                    shutil.rmtree(ent)
-                else:
-                    os.unlink(ent)
+                os.rename(os.path.join(dir, filename),
+                          os.path.join(old_dir, filename))
 
         allservices = self.services or []
-        if singleservice and not singleservice in allservices:
+        service_names = [s['name'] for s in allservices]
+        if singleservice and singleservice not in service_names:
             # set array to the manual specified singleservice, if it is not part of _service file
-            data = { 'name' : singleservice, 'command' : [ singleservice ], 'mode' : '' }
+            data = { 'name' : singleservice, 'command' : [ singleservice ], 'mode' : callmode }
             allservices = [data]
+        elif singleservice:
+            allservices = [s for s in allservices if s['name'] == singleservice]
 
         if not allservices:
             # short-circuit to avoid a potential http request in vc_export_env
@@ -437,7 +456,7 @@ class Serviceinfo:
         # set environment when using OBS 2.3 or later
         if self.project != None:
             # These need to be kept in sync with bs_service
-            os.putenv("OBS_SERVICE_APIURL",  self.apiurl)
+            os.putenv("OBS_SERVICE_APIURL", self.apiurl)
             os.putenv("OBS_SERVICE_PROJECT", self.project)
             os.putenv("OBS_SERVICE_PACKAGE", self.package)
             # also export vc env vars (some services (like obs_scm) use them)
@@ -447,11 +466,13 @@ class Serviceinfo:
         ret = 0
         for service in allservices:
             if callmode != "all":
-                if singleservice and service['name'] != singleservice:
-                    continue
                 if service['mode'] == "buildtime":
                     continue
-                if service['mode'] == "serveronly" and callmode != "disabled":
+                if service['mode'] == "serveronly" and callmode != "local":
+                    continue
+                if service['mode'] == "manual" and callmode != "manual":
+                    continue
+                if service['mode'] != "manual" and callmode == "manual":
                     continue
                 if service['mode'] == "disabled" and callmode != "disabled":
                     continue
@@ -463,8 +484,8 @@ class Serviceinfo:
             try:
                 temp_dir = tempfile.mkdtemp(dir=dir, suffix='.%s.service' % service['name'])
                 cmd = service['command']
-                if not os.path.exists("/usr/lib/obs/service/"+cmd[0]):
-                    raise oscerr.PackageNotInstalled("obs-service-%s"%cmd[0])
+                if not os.path.exists("/usr/lib/obs/service/" + cmd[0]):
+                    raise oscerr.PackageNotInstalled("obs-service-%s" % cmd[0])
                 cmd[0] = "/usr/lib/obs/service/"+cmd[0]
                 cmd = cmd + [ "--outdir", temp_dir ]
                 if conf.config['verbose'] > 1 or verbose or conf.config['debug']:
@@ -477,7 +498,7 @@ class Serviceinfo:
                     #        updating _services.
                     return r
 
-                if service['mode'] == "disabled" or service['mode'] == "trylocal" or service['mode'] == "localonly" or callmode == "local" or callmode == "trylocal" or callmode == "all":
+                if service['mode'] == "manual" or service['mode'] == "disabled" or service['mode'] == "trylocal" or service['mode'] == "localonly" or callmode == "local" or callmode == "trylocal" or callmode == "all":
                     for filename in os.listdir(temp_dir):
                         os.rename(os.path.join(temp_dir, filename), os.path.join(dir, filename))
                 else:
@@ -491,7 +512,7 @@ class Serviceinfo:
         return 0
 
 class Linkinfo:
-    """linkinfo metadata (which is part of the xml representing a directory
+    """linkinfo metadata (which is part of the xml representing a directory)
     """
     def __init__(self):
         """creates an empty linkinfo instance"""
@@ -505,9 +526,9 @@ class Linkinfo:
         self.baserev = None
 
     def read(self, linkinfo_node):
-        """read in the linkinfo metadata from the <linkinfo> element passed as
+        """read in the linkinfo metadata from the ``<linkinfo>`` element passed as
         elementtree node.
-        If the passed element is None, the method does nothing.
+        If the passed element is ``None``, the method does nothing.
         """
         if linkinfo_node == None:
             return
@@ -515,25 +536,25 @@ class Linkinfo:
         self.package = linkinfo_node.get('package')
         self.xsrcmd5 = linkinfo_node.get('xsrcmd5')
         self.lsrcmd5 = linkinfo_node.get('lsrcmd5')
-        self.srcmd5  = linkinfo_node.get('srcmd5')
-        self.error   = linkinfo_node.get('error')
-        self.rev     = linkinfo_node.get('rev')
+        self.srcmd5 = linkinfo_node.get('srcmd5')
+        self.error = linkinfo_node.get('error')
+        self.rev = linkinfo_node.get('rev')
         self.baserev = linkinfo_node.get('baserev')
 
     def islink(self):
-        """returns True if the linkinfo is not empty, otherwise False"""
-        if self.xsrcmd5 or self.lsrcmd5:
+        """:return: ``True`` if the linkinfo is not empty, otherwise ``False``"""
+        if self.xsrcmd5 or self.lsrcmd5 or self.error is not None:
             return True
         return False
 
     def isexpanded(self):
-        """returns True if the package is an expanded link"""
+        """:return: ``True`` if the package is an expanded link"""
         if self.lsrcmd5 and not self.xsrcmd5:
             return True
         return False
 
     def haserror(self):
-        """returns True if the link is in error state (could not be applied)"""
+        """:return: ``True`` if the link is in error state (could not be applied)"""
         if self.error:
             return True
         return False
@@ -667,6 +688,7 @@ class Project:
         self.progress_obj = progress_obj
 
         self.name = store_read_project(self.dir)
+        self.scm_url = store_read_scmurl(self.dir)
         self.apiurl = store_read_apiurl(self.dir, defaulturl=not wc_check)
 
         dirty_files = []
@@ -707,7 +729,7 @@ class Project:
         global store
         dirty_files = []
         req_storefiles = Project.REQ_STOREFILES
-        if conf.config['do_package_tracking']:
+        if conf.config['do_package_tracking'] and self.scm_url == None:
             req_storefiles += ('_packages',)
         for fname in req_storefiles:
             if not os.path.exists(os.path.join(self.absdir, store, fname)):
@@ -816,7 +838,7 @@ class Project:
 
     def read_packages(self):
         """
-        Returns an ``xml.etree.cElementTree`` object representing the
+        Returns an ``xml.etree.ElementTree`` object representing the
         parsed contents of the project's ``.osc/_packages`` XML file.
         """
         global store
@@ -941,7 +963,11 @@ class Project:
                         p = Package(os.path.join(self.dir, pac), progress_obj=self.progress_obj)
                         rev = None
                         needs_update = True
-                        if expand_link and p.islink() and not p.isexpanded():
+                        if p.scm_url != None:
+                            # git managed.
+                            print("Skipping git managed package ", pac)
+                            continue
+                        elif expand_link and p.islink() and not p.isexpanded():
                             if p.haslinkerror():
                                 try:
                                     rev = show_upstream_xsrcmd5(p.apiurl, p.prjname, p.name, revision=p.rev)
@@ -1014,7 +1040,7 @@ class Project:
                         p.commit(msg, verbose=verbose, skip_local_service_run=skip_local_service_run, can_branch=can_branch, force=force)
                     elif pac in self.pacs_unvers and not is_package_dir(os.path.join(self.dir, pac)):
                         print('osc: \'%s\' is not under version control' % pac)
-                    elif pac in self.pacs_broken:
+                    elif pac in self.pacs_broken or not os.path.exists(os.path.join(self.dir, pac)):
                         print('osc: \'%s\' package not found' % pac)
                     elif state == None:
                         self.commitExtPackage(pac, msg, todo, verbose=verbose, skip_local_service_run=skip_local_service_run)
@@ -1119,7 +1145,7 @@ class Project:
         return '\n'.join(r)
 
     @staticmethod
-    def init_project(apiurl, dir, project, package_tracking=True, getPackageList=True, progress_obj=None, wc_check=True):
+    def init_project(apiurl, dir, project, package_tracking=True, getPackageList=True, progress_obj=None, wc_check=True, scm_url=None):
         global store
 
         if not os.path.exists(dir):
@@ -1134,6 +1160,9 @@ class Project:
 
         store_write_project(dir, project)
         store_write_apiurl(dir, apiurl)
+        if scm_url:
+            store_write_string(dir, '_scm', scm_url + '\n')
+            package_tracking = None
         if package_tracking:
             store_write_initial_packages(dir, project, [])
         return Project(dir, getPackageList, progress_obj, wc_check)
@@ -1156,6 +1185,7 @@ class Package:
         self.storedir = os.path.join(self.absdir, store)
         self.progress_obj = progress_obj
         self.size_limit = size_limit
+        self.scm_url = store_read_scmurl(self.dir)
         if size_limit and size_limit == 0:
             self.size_limit = None
 
@@ -1180,6 +1210,8 @@ class Package:
 
     def wc_check(self):
         dirty_files = []
+        if self.scm_url:
+            return dirty_files
         for fname in self.filenamelist:
             if not os.path.exists(os.path.join(self.storedir, fname)) and not fname in self.skipped:
                 dirty_files.append(fname)
@@ -1282,7 +1314,7 @@ class Package:
             self.to_be_added.remove(n)
             self.write_addlist()
         elif state == 'C':
-            # don't remove "merge files" (*.r, *.mine...)
+            # don't remove "merge files" (*.mine, *.new...)
             # that's why we don't use clear_from_conflictlist
             self.in_conflict.remove(n)
             self.write_conflictlist()
@@ -1318,15 +1350,10 @@ class Package:
             filename = os.path.join(self.dir, n)
             storefilename = os.path.join(self.storedir, n)
             myfilename = os.path.join(self.dir, n + '.mine')
-            if self.islinkrepair() or self.ispulled():
-                upfilename = os.path.join(self.dir, n + '.new')
-            else:
-                upfilename = os.path.join(self.dir, n + '.r' + self.rev)
+            upfilename = os.path.join(self.dir, n + '.new')
 
             try:
                 os.unlink(myfilename)
-                # the working copy may be updated, so the .r* ending may be obsolete...
-                # then we don't care
                 os.unlink(upfilename)
                 if self.islinkrepair() or self.ispulled():
                     os.unlink(os.path.join(self.dir, n + '.old'))
@@ -1515,8 +1542,8 @@ class Package:
                         'error: file \'%s\' with state \'%s\' is not known by meta' \
                         % (filename, st))
                 todo_send[filename] = f.md5
-            if ((self.ispulled() or self.islinkrepair()) and st != 'A'
-                and filename not in sha256sums):
+            if ((self.ispulled() or self.islinkrepair() or self.isfrozen())
+                and st != 'A' and filename not in sha256sums):
                 # Ignore files with state 'A': if we should consider it,
                 # it would have been in pac.todo, which implies that it is
                 # in sha256sums.
@@ -1532,7 +1559,7 @@ class Package:
         print('Transmitting file data', end=' ')
         filelist = self.__generate_commitlist(todo_send)
         sfilelist = self.__send_commitlog(msg, filelist, validate=True)
-        hash_entries = [e for e in sfilelist.findall('entry') if e.get('hash') is not None] 
+        hash_entries = [e for e in sfilelist.findall('entry') if e.get('hash') is not None]
         if sfilelist.get('error') and hash_entries:
             name2elem = dict([(e.get('name'), e) for e in filelist.findall('entry')])
             for entry in hash_entries:
@@ -1665,7 +1692,7 @@ class Package:
         filename = os.path.join(self.dir, n)
         storefilename = os.path.join(self.storedir, n)
         myfilename = os.path.join(self.dir, n + '.mine')
-        upfilename = os.path.join(self.dir, n + '.r' + self.rev)
+        upfilename = os.path.join(self.dir, n + '.new')
         origfile_tmp = os.path.join(self.storedir, '_in_update', '%s.copy' % n)
         origfile = os.path.join(self.storedir, '_in_update', n)
         shutil.copyfile(filename, origfile_tmp)
@@ -1761,6 +1788,24 @@ class Package:
         called).
         """
         import fnmatch
+        if self.scm_url:
+            self.filenamelist = []
+            self.filelist = []
+            self.skipped = []
+            self.to_be_added = []
+            self.to_be_deleted = []
+            self.in_conflict = []
+            self.linkrepair = None
+            self.rev = None
+            self.srcmd5 = None
+            self.linkinfo = None
+            self.serviceinfo = None
+            self.size_limit = None
+            self.meta = None
+            self.excluded = []
+            self.filenamelist_unvers = []
+            return
+
         files_tree = read_filemeta(self.dir)
         files_tree_root = files_tree.getroot()
 
@@ -1771,10 +1816,10 @@ class Package:
         self.linkinfo.read(files_tree_root.find('linkinfo'))
         self.serviceinfo = DirectoryServiceinfo()
         self.serviceinfo.read(files_tree_root.find('serviceinfo'))
-
         self.filenamelist = []
         self.filelist = []
         self.skipped = []
+
         for node in files_tree_root.findall('entry'):
             try:
                 f = File(node.get('name'),
@@ -1811,12 +1856,12 @@ class Package:
     def islink(self):
         """tells us if the package is a link (has 'linkinfo').
         A package with linkinfo is a package which links to another package.
-        Returns True if the package is a link, otherwise False."""
+        Returns ``True`` if the package is a link, otherwise ``False``."""
         return self.linkinfo.islink()
 
     def isexpanded(self):
         """tells us if the package is a link which is expanded.
-        Returns True if the package is expanded, otherwise False."""
+        Returns ``True`` if the package is expanded, otherwise ``False``."""
         return self.linkinfo.isexpanded()
 
     def islinkrepair(self):
@@ -1843,21 +1888,21 @@ class Package:
 
     def haslinkerror(self):
         """
-        Returns True if the link is broken otherwise False.
-        If the package is not a link it returns False.
+        Returns ``True`` if the link is broken otherwise ``False``.
+        If the package is not a link it returns ``False``.
         """
         return self.linkinfo.haserror()
 
     def linkerror(self):
         """
-        Returns an error message if the link is broken otherwise None.
-        If the package is not a link it returns None.
+        Returns an error message if the link is broken otherwise ``None``.
+        If the package is not a link it returns ``None``.
         """
         return self.linkinfo.error
 
     def hasserviceinfo(self):
         """
-        Returns True, if this package contains services.
+        Returns ``True``, if this package contains services.
         """
         return self.serviceinfo.lsrcmd5 is not None or self.serviceinfo.xsrcmd5 is not None
 
@@ -1895,24 +1940,22 @@ class Package:
 
     def status(self, n):
         """
-        status can be:
+        status can be::
 
-         file  storefile  file present  STATUS
-        exists  exists      in _files
-
-          x       -            -        'A' and listed in _to_be_added
-          x       x            -        'R' and listed in _to_be_added
-          x       x            x        ' ' if digest differs: 'M'
-                                            and if in conflicts file: 'C'
-          x       -            -        '?'
-          -       x            x        'D' and listed in _to_be_deleted
-          x       x            x        'D' and listed in _to_be_deleted (e.g. if deleted file was modified)
-          x       x            x        'C' and listed in _in_conflict
-          x       -            x        'S' and listed in self.skipped
-          -       -            x        'S' and listed in self.skipped
-          -       x            x        '!'
-          -       -            -        NOT DEFINED
-
+             file  storefile  file present  STATUS
+            exists  exists      in _files
+              x       -            -        'A' and listed in _to_be_added
+              x       x            -        'R' and listed in _to_be_added
+              x       x            x        ' ' if digest differs: 'M'
+                                                and if in conflicts file: 'C'
+              x       -            -        '?'
+              -       x            x        'D' and listed in _to_be_deleted
+              x       x            x        'D' and listed in _to_be_deleted (e.g. if deleted file was modified)
+              x       x            x        'C' and listed in _in_conflict
+              x       -            x        'S' and listed in self.skipped
+              -       -            x        'S' and listed in self.skipped
+              -       x            x        '!'
+              -       -            -        NOT DEFINED
         """
 
         known_by_meta = False
@@ -1987,6 +2030,9 @@ class Package:
                     rev = 'working copy'
                 diff.append(b'+++ %s\t(%s)\n' % (fname.encode(), rev.encode()))
                 fname = os.path.join(self.absdir, fname)
+                if not os.path.isfile(fname):
+                    raise oscerr.OscIOError(None, 'file \'%s\' is marked as \'A\' but does not exist\n'
+                                            '(either add the missing file or revert it)' % fname)
             else:
                 if revision:
                     b_revision = str(revision).encode()
@@ -2149,8 +2195,11 @@ rev: %s
             url = ET.SubElement(root, 'url')
         url.text = self.url
 
-        u = makeurl(self.apiurl, ['source', self.prjname, self.name, '_meta'])
-        mf = metafile(u, ET.tostring(root, encoding=ET_ENCODING))
+        delegate = lambda force=False: make_meta_url('pkg',
+                                                     (self.prjname, self.name),
+                                                     self.apiurl, force=force)
+        url_factory = metafile._URLFactory(delegate)
+        mf = metafile(url_factory, ET.tostring(root, encoding=ET_ENCODING))
 
         if not force:
             print('*' * 36, 'old', '*' * 36)
@@ -2371,7 +2420,7 @@ rev: %s
             # the file was already deleted but we cannot know this
             # OR we're processing a _service: file (simply keep the file)
             if os.path.isfile(os.path.join(self.storedir, f.name)) and self.status(f.name) not in ('M', 'C'):
-#            if self.status(f.name) != 'M':
+                # if self.status(f.name) != 'M':
                 self.delete_localfile(f.name)
             self.delete_storefile(f.name)
             print(statfrmt('D', os.path.join(pathn, f.name)))
@@ -2472,7 +2521,7 @@ rev: %s
             self.write_addlist()
 
     @staticmethod
-    def init_package(apiurl, project, package, dir, size_limit=None, meta=False, progress_obj=None):
+    def init_package(apiurl, project, package, dir, size_limit=None, meta=False, progress_obj=None, scm_url=None):
         global store
 
         if not os.path.exists(dir):
@@ -2490,36 +2539,39 @@ rev: %s
             store_write_string(dir, '_meta_mode', '')
         if size_limit:
             store_write_string(dir, '_size_limit', str(size_limit) + '\n')
-        store_write_string(dir, '_files', '<directory />' + '\n')
+        if scm_url:
+            store_write_string(dir, '_scm', scm_url + '\n')
+        else:
+            store_write_string(dir, '_files', '<directory />' + '\n')
         store_write_string(dir, '_osclib_version', __store_version__ + '\n')
         return Package(dir, progress_obj=progress_obj, size_limit=size_limit)
 
 
 class AbstractState:
     """
-    Base class which represents state-like objects (<review />, <state />).
+    Base class which represents state-like objects (``<review />``, ``<state />``).
     """
     def __init__(self, tag):
         self.__tag = tag
 
     def get_node_attrs(self):
-        """return attributes for the tag/element"""
+        """:return: attributes for the tag/element"""
         raise NotImplementedError()
 
     def get_node_name(self):
-        """return tag/element name"""
+        """:return: tag/element name"""
         return self.__tag
 
     def get_comment(self):
-        """return data from <comment /> tag"""
+        """:return: data from ``<comment />`` tag"""
         raise NotImplementedError()
 
     def get_description(self):
-        """return data from <description /> tag"""
+        """:return: data from ``<description />`` tag"""
         raise NotImplementedError()
 
     def to_xml(self):
-        """serialize object to XML"""
+        """:return: object serialized to XML"""
         root = ET.Element(self.get_node_name())
         for attr in self.get_node_attrs():
             val = getattr(self, attr)
@@ -2532,7 +2584,7 @@ class AbstractState:
         return root
 
     def to_str(self):
-        """return "pretty" XML data"""
+        """:return: object serialized to pretty-printed XML"""
         root = self.to_xml()
         xmlindent(root)
         return ET.tostring(root, encoding=ET_ENCODING)
@@ -2639,11 +2691,15 @@ class RequestState(AbstractState):
 
 class Action:
     """
-    Represents a <action /> element of a Request.
+    Represents an ``<action />`` element of a Request.
     This class is quite common so that it can be used for all different
-    action types. Note: instances only provide attributes for their specific
-    type.
-    Examples:
+    action types.
+
+    .. note::
+        Instances only provide attributes for their specific type.
+
+    Examples::
+
       r = Action('set_bugowner', tgt_project='foo', person_name='buguser')
       # available attributes: r.type (== 'set_bugowner'), r.tgt_project (== 'foo'), r.tgt_package (== None)
       r.to_str() ->
@@ -2651,7 +2707,7 @@ class Action:
         <target project="foo" />
         <person name="buguser" />
       </action>
-      ##
+
       r = Action('delete', tgt_project='foo', tgt_package='bar')
       # available attributes: r.type (== 'delete'), r.tgt_project (== 'foo'), r.tgt_package (=='bar')
       r.to_str() ->
@@ -2669,6 +2725,9 @@ class Action:
         'maintenance_release': ('src_project', 'src_package', 'src_rev', 'tgt_project', 'tgt_package', 'person_name',
                             'acceptinfo_rev', 'acceptinfo_srcmd5', 'acceptinfo_xsrcmd5', 'acceptinfo_osrcmd5',
                             'acceptinfo_oxsrcmd5', 'acceptinfo_oproject', 'acceptinfo_opackage'),
+        'release': ('src_project', 'src_package', 'src_rev', 'tgt_project', 'tgt_package', 'person_name',
+                            'acceptinfo_rev', 'acceptinfo_srcmd5', 'acceptinfo_xsrcmd5', 'acceptinfo_osrcmd5',
+                            'acceptinfo_oxsrcmd5', 'acceptinfo_oproject', 'acceptinfo_opackage', 'tgt_repository'),
         'maintenance_incident': ('src_project', 'src_package', 'src_rev', 'tgt_project', 'tgt_package', 'tgt_releaseproject', 'person_name', 'opt_sourceupdate', 'opt_makeoriginolder',
                             'acceptinfo_rev', 'acceptinfo_srcmd5', 'acceptinfo_xsrcmd5', 'acceptinfo_osrcmd5',
                             'acceptinfo_oxsrcmd5'),
@@ -2693,13 +2752,18 @@ class Action:
         """
         Serialize object to XML.
         The xml tag names and attributes are constructed from the instance's attributes.
-        Example:
+
+        :return: object serialized to XML
+
+        Example::
+
           self.group_name  -> tag name is "group", attribute name is "name"
           self.src_project -> tag name is "source" (translated via prefix_to_elm dict),
                               attribute name is "project"
-        Attributes prefixed with "opt_" need a special handling, the resulting xml should
-        look like this: opt_updatelink -> <options><updatelink>value</updatelink></options>.
-        Attributes which are "None" will be skipped.
+
+        Attributes prefixed with ``opt_`` need a special handling, the resulting xml should
+        look like this: ``opt_updatelink`` -> ``<options><updatelink>value</updatelink></options>``.
+        Attributes which are ``None`` will be skipped.
         """
         root = ET.Element('action', type=self.type)
         for i in Action.type_args[self.type]:
@@ -2724,7 +2788,7 @@ class Action:
         return root
 
     def to_str(self):
-        """return "pretty" XML data"""
+        """:return: object serialized to pretty-printed XML"""
         root = self.to_xml()
         xmlindent(root)
         return ET.tostring(root, encoding=ET_ENCODING)
@@ -2759,7 +2823,7 @@ class Action:
 
 
 class Request:
-    """Represents a request (<request />)"""
+    """Represents a request (``<request />``)"""
 
     def __init__(self):
         self._init_attributes()
@@ -2831,7 +2895,7 @@ class Request:
         return self.creator
 
     def to_xml(self):
-        """serialize object to XML"""
+        """:return: object serialized to XML"""
         root = ET.Element('request')
         if self.reqid is not None:
             root.set('id', self.reqid)
@@ -2856,7 +2920,7 @@ class Request:
         return root
 
     def to_str(self):
-        """return "pretty" XML data"""
+        """:return: object serialized to pretty-printed XML"""
         root = self.to_xml()
         xmlindent(root)
         return ET.tostring(root, encoding=ET_ENCODING)
@@ -2928,7 +2992,7 @@ class Request:
             srcupdate = ' '
             if action.opt_sourceupdate and show_srcupdate:
                 srcupdate = '(%s)' % action.opt_sourceupdate
-        elif action.type == 'maintenance_release':
+        elif action.type in ('maintenance_release', 'release'):
             d['source'] = '%s' % prj_pkg_join(action.src_project, action.src_package)
             if action.src_rev:
                 d['source'] = d['source'] + '@%s' % action.src_rev
@@ -3233,6 +3297,8 @@ def read_filemeta(dir):
     filesmeta = os.path.join(dir, store, '_files')
     if not is_package_dir(dir):
         raise oscerr.NoWorkingCopy(msg)
+    if os.path.isfile(os.path.join(dir, store, '_scm')):
+        raise oscerr.NoWorkingCopy("Is managed via scm")
     if not os.path.isfile(filesmeta):
         raise oscerr.NoWorkingCopy('%s (%s does not exist)' % (msg, filesmeta))
 
@@ -3319,22 +3385,28 @@ def makeurl(baseurl, l, query=[]):
 def http_request(method, url, headers={}, data=None, file=None):
     """wrapper around urllib2.urlopen for error handling,
     and to support additional (PUT, DELETE) methods"""
-    def create_memoryview(obj):
-        if sys.version_info < (2, 7, 99):
-            # obj might be a mmap and python 2.7's mmap does not
-            # behave like a bytearray (a bytearray in turn can be used
-            # to create the memoryview). For now simply return a buffer
-            return buffer(obj)
-        return memoryview(obj)
+    class DataContext:
+        """Wrap a data value (or None) in a context manager."""
 
-    filefd = None
+        def __init__(self, data):
+            self._data = data
+
+        def __enter__(self):
+            return self._data
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return None
+
+
+    if file is not None and data is not None:
+        raise RuntimeError('file and data are mutually exclusive')
 
     if conf.config['http_debug']:
         print('\n\n--', method, url, file=sys.stderr)
 
     if method == 'POST' and not file and not data:
         # adding data to an urllib2 request transforms it into a POST
-        data = ''
+        data = b''
 
     req = URLRequest(url)
     api_host_options = {}
@@ -3348,6 +3420,10 @@ def http_request(method, url, headers={}, data=None, file=None):
 
     req.get_method = lambda: method
 
+    # Rails sends a html response if the header is not set
+    # https://github.com/openSUSE/open-build-service/pull/13019
+    req.add_header("Accept", "application/xml")
+
     # POST requests are application/x-www-form-urlencoded per default
     # but sending data requires an octet-stream type
     if method == 'PUT' or (method == 'POST' and (data or file)):
@@ -3358,43 +3434,31 @@ def http_request(method, url, headers={}, data=None, file=None):
             print(headers[i])
             req.add_header(i, headers[i])
 
-    if file and not data:
-        size = os.path.getsize(file)
-        if size < 1024*512:
-            data = open(file, 'rb').read()
-        else:
-            import mmap
-            filefd = open(file, 'rb')
-            try:
-                if sys.platform[:3] != 'win':
-                    data = mmap.mmap(filefd.fileno(), os.path.getsize(file), mmap.MAP_SHARED, mmap.PROT_READ)
-                else:
-                    data = mmap.mmap(filefd.fileno(), os.path.getsize(file))
-                data = create_memoryview(data)
-            except EnvironmentError as e:
-                if e.errno == 19:
-                    sys.exit('\n\n%s\nThe file \'%s\' could not be memory mapped. It is ' \
-                             '\non a filesystem which does not support this.' % (e, file))
-                elif hasattr(e, 'winerror') and e.winerror == 5:
-                    # falling back to the default io
-                    data = open(file, 'rb').read()
-                else:
-                    raise
-
     if conf.config['debug']: print(method, url, file=sys.stderr)
 
-    try:
+    content_length = None
+    if data is not None:
         if isinstance(data, str):
-            data = bytes(data, "utf-8")
-        fd = urlopen(req, data=data)
+            data = data.encode('utf-8')
+        content_length = len(data)
+    elif file is not None:
+        content_length = os.path.getsize(file)
 
-    finally:
-        if hasattr(conf.cookiejar, 'save'):
-            conf.cookiejar.save(ignore_discard=True)
-
-    if filefd: filefd.close()
-
-    return fd
+    with (open(file, 'rb') if file is not None else DataContext(data)) as d:
+        req.data = d
+        if content_length is not None:
+            # do this after setting req.data because the corresponding setter
+            # kills an existing Content-Length header (see urllib.Request class
+            # (python38))
+            req.add_header('Content-Length', str(content_length))
+        try:
+            return urlopen(req)
+        except URLError as e:
+            e._osc_host_port = req.host
+            raise
+        finally:
+            if hasattr(conf.cookiejar, 'save'):
+                conf.cookiejar.save(ignore_discard=True)
 
 
 def http_GET(*args, **kwargs):    return http_request('GET', *args, **kwargs)
@@ -3436,6 +3500,11 @@ def meta_get_packagelist(apiurl, prj, deleted=None, expand=False):
     query = {}
     if deleted:
         query['deleted'] = 1
+    elif deleted in (False, 0):
+        # HACK: Omitted 'deleted' and 'deleted=0' produce different results.
+        # By explicit 'deleted=0', we also get multibuild packages listed.
+        # See: https://github.com/openSUSE/open-build-service/issues/9715
+        query['deleted'] = 0
     if expand:
         query['expand'] = 1
 
@@ -3551,10 +3620,6 @@ def show_package_meta(apiurl, prj, pac, meta=False, blame=None):
         query['view'] = "blame"
         query['meta'] = 1
 
-    # The fake packages _project has no _meta file
-    if pac.startswith('_project'):
-        return ""
-
     url = makeurl(apiurl, ['source', prj, pac, '_meta'], query)
     try:
         f = http_GET(url)
@@ -3588,6 +3653,23 @@ def show_attribute_meta(apiurl, prj, pac, subpac, attribute, with_defaults, with
         e.osc_msg = 'Error getting meta for project \'%s\' package \'%s\'' % (prj, pac)
         raise
 
+
+def clean_assets(directory):
+    return run_external(conf.config['download-assets-cmd'], '--clean', directory)
+
+def download_assets(directory):
+    return run_external(conf.config['download-assets-cmd'], '--unpack', '--noassetdir', directory)
+
+def show_scmsync(apiurl, prj, pac=None):
+    if pac:
+        m = show_package_meta(apiurl, prj, pac)
+    else:
+        m = show_project_meta(apiurl, prj)
+    node = ET.fromstring(b''.join(m)).find('scmsync')
+    if node is None:
+        return None
+    else:
+        return node.text
 
 def show_devel_project(apiurl, prj, pac):
     m = show_package_meta(apiurl, prj, pac)
@@ -3667,10 +3749,29 @@ def show_configuration(apiurl):
 
 class metafile:
     """metafile that can be manipulated and is stored back after manipulation."""
+
+    class _URLFactory:
+        # private class which might go away again...
+        def __init__(self, delegate, force_supported=True):
+            self._delegate = delegate
+            self._force_supported = force_supported
+
+        def is_force_supported(self):
+            return self._force_supported
+
+        def __call__(self, **kwargs):
+            return self._delegate(**kwargs)
+
     def __init__(self, url, input, change_is_required=False, file_ext='.xml'):
         import tempfile
 
-        self.url = url
+        if isinstance(url, self._URLFactory):
+            self._url_factory = url
+        else:
+            delegate = lambda **kwargs: url
+            # force is not supported for a raw url
+            self._url_factory = self._URLFactory(delegate, False)
+        self.url = self._url_factory()
         self.change_is_required = change_is_required
         (fd, self.filename) = tempfile.mkstemp(prefix = 'osc_metafile.', suffix = file_ext)
 
@@ -3704,8 +3805,11 @@ class metafile:
 
     def edit(self):
         try:
+            try_force = False
             while True:
-                run_editor(self.filename)
+                if not try_force:
+                    run_editor(self.filename)
+                try_force = False
                 try:
                     self.sync()
                     break
@@ -3721,8 +3825,18 @@ class metafile:
                     summary = root.find('summary')
                     if summary is not None:
                         print(summary.text, file=sys.stderr)
-                    ri = raw_input('Try again? ([y/N]): ')
-                    if ri not in ['y', 'Y']:
+                    if self._url_factory.is_force_supported():
+                        prompt = 'Try again? ([y/N/f]): '
+                    else:
+                        prompt = 'Try again? ([y/N): '
+
+                    ri = raw_input(prompt)
+                    if ri in ('y', 'Y'):
+                        self.url = self._url_factory()
+                    elif ri in ('f', 'F') and self._url_factory.is_force_supported():
+                        self.url = self._url_factory(force='1')
+                        try_force = True
+                    else:
                         break
         finally:
             self.discard()
@@ -3859,8 +3973,12 @@ def edit_meta(metatype,
             print('  osc meta pkg %s %s -e' % (unquote(project), package))
             return
 
-    url = make_meta_url(metatype, path_args, apiurl, force, remove_linking_repositories, msg)
-    f = metafile(url, data, change_is_required, metatypes[metatype]['file_ext'])
+    delegate = lambda force=force: make_meta_url(metatype, path_args, apiurl,
+                                                 force,
+                                                 remove_linking_repositories,
+                                                 msg)
+    url_factory = metafile._URLFactory(delegate)
+    f = metafile(url_factory, data, change_is_required, metatypes[metatype]['file_ext'])
 
     if edit:
         f.edit()
@@ -4033,8 +4151,6 @@ def _get_linux_distro():
 
 def get_default_editor():
     system = platform.system()
-    if system == 'Windows':
-        return 'notepad'
     if system == 'Linux':
         dist = _get_linux_distro()
         if dist == 'debian':
@@ -4046,8 +4162,6 @@ def get_default_editor():
 
 def get_default_pager():
     system = platform.system()
-    if system == 'Windows':
-        return 'less'
     if system == 'Linux':
         dist = _get_linux_distro()
         if dist == 'debian':
@@ -4181,7 +4295,7 @@ def create_release_request(apiurl, src_project, message=''):
     # api will complete the request
     r.add_action('maintenance_release', src_project=src_project)
     # XXX: clarify why we need the unicode(...) stuff
-    r.description = _html_escape(unicode(message, 'utf8'))
+    r.description = unicode(message, 'utf8')
     r.create(apiurl)
     return r
 
@@ -4194,7 +4308,7 @@ def create_maintenance_request(apiurl, src_project, src_packages, tgt_project, t
     else:
         r.add_action('maintenance_incident', src_project=src_project, tgt_project=tgt_project, tgt_releaseproject=tgt_releaseproject, opt_sourceupdate = opt_sourceupdate)
     # XXX: clarify why we need the unicode(...) stuff
-    r.description = _html_escape(unicode(message, 'utf8'))
+    r.description = unicode(message, 'utf8')
     r.create(apiurl, addrevision=True, enforce_branching=enforce_branching)
     return r
 
@@ -4252,19 +4366,19 @@ def create_submit_request(apiurl,
         r = root.get('id')
     except HTTPError as e:
         if e.hdrs.get('X-Opensuse-Errorcode') == "submit_request_rejected":
-            print("WARNING:")
-            print("WARNING: Project does not accept submit request, a NEW maintenance incident request will be created instead")
-            print("WARNING:")
+            print('WARNING: As the project is in maintenance, a maintenance incident request is')
+            print('WARNING: being created (instead of a regular submit request). If this is not your')
+            print('WARNING: intention please revoke it to avoid unnecessary work for all involved parties.')
             xpath = 'maintenance/maintains/@project = \'%s\' and attribute/@name = \'%s\'' % (dst_project, conf.config['maintenance_attribute'])
             res = search(apiurl, project_id=xpath)
             root = res['project_id']
             project = root.find('project')
             if project is None:
-               print("WARNING: This project is not maintained in the maintenance project specified by '%s', looking elsewhere" % conf.config['maintenance_attribute'])
-               xpath = 'maintenance/maintains/@project = \'%s\'' % dst_project
-               res = search(apiurl, project_id=xpath)
-               root = res['project_id']
-               project = root.find('project')
+                print("WARNING: This project is not maintained in the maintenance project specified by '%s', looking elsewhere" % conf.config['maintenance_attribute'])
+                xpath = 'maintenance/maintains/@project = \'%s\'' % dst_project
+                res = search(apiurl, project_id=xpath)
+                root = res['project_id']
+                project = root.find('project')
             if project is None:
                 raise oscerr.APIError("Server did not define a default maintenance project, can't submit.")
             tproject = project.get('name')
@@ -4397,11 +4511,11 @@ def get_review_list(apiurl, project='', package='', byuser='', bygroup='', bypro
 # this function uses the logic in the api which is faster and more exact then the xpath search
 def get_request_collection(apiurl, role=None, req_who=None, req_states=('new', 'review', 'declined')):
 
-    query={ "view" : "collection" }
+    query = {"view": "collection"}
     if role:
-       query["roles"] = role
+        query["roles"] = role
     if req_who:
-       query["user"] = req_who
+        query["user"] = req_who
 
     query["states"] = ",".join(req_states)
 
@@ -4574,10 +4688,10 @@ def check_existing_maintenance_requests(apiurl, src_project, src_packages, dst_p
                                         release_project, ask=True):
     reqs = []
     for src_package in src_packages:
-       reqs += get_exact_request_list(apiurl, src_project, dst_project,
-                                  src_package, None,
-                                  req_type='maintenance_incident',
-                                  req_state=['new', 'review', 'declined'])
+        reqs += get_exact_request_list(apiurl, src_project, dst_project,
+                                       src_package, None,
+                                       req_type='maintenance_incident',
+                                       req_state=['new', 'review', 'declined'])
     if not ask:
         return True, reqs
     repl = ''
@@ -4697,6 +4811,15 @@ def get_binary_file(apiurl, prj, repo, arch,
 
     target_filename = target_filename or filename
 
+    # create target directory if it doesn't exist
+    target_dir = os.path.dirname(target_filename)
+    if target_dir:
+        try:
+            os.makedirs(target_dir, 0o755)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+
     where = package or '_repository'
     u = makeurl(apiurl, ['build', prj, repo, arch, where, filename])
     download(u, target_filename, progress_obj, target_mtime)
@@ -4739,7 +4862,7 @@ def sha256_dgst(file):
     return s.hexdigest()
 
 def binary(s):
-    """return true if a string is binary data using diff's heuristic"""
+    """return ``True`` if a string is binary data using diff's heuristic"""
     if s and bytes('\0', "utf-8") in s[:4096]:
         return True
     return False
@@ -4794,7 +4917,7 @@ def get_source_file_diff(dir, filename, rev, oldfilename = None, olddir = None, 
     from_file = b'%s\t(revision %s)' % (origfilename.encode(), str(rev).encode())
     to_file = b'%s\t(working copy)' % origfilename.encode()
 
-    if sys.version_info < (3,0):
+    if sys.version_info < (3, 0):
         d = difflib.unified_diff(s1, s2,
             fromfile = from_file, \
         tofile = to_file)
@@ -4820,7 +4943,7 @@ def get_source_file_diff(dir, filename, rev, oldfilename = None, olddir = None, 
 def server_diff(apiurl,
                 old_project, old_package, old_revision,
                 new_project, new_package, new_revision,
-                unified=False, missingok=False, meta=False, expand=True, onlyissues=False, full=True):
+                unified=False, missingok=False, meta=False, expand=True, onlyissues=False, full=True, xml=False):
     query = {'cmd': 'diff'}
     if expand:
         query['expand'] = 1
@@ -4848,24 +4971,34 @@ def server_diff(apiurl,
 
     u = makeurl(apiurl, ['source', new_project, new_package], query=query)
     f = http_POST(u)
-    if onlyissues:
-        issue_list = []
+    if onlyissues and not xml:
+        del_issue_list = []
+        add_issue_list = []
+        chn_issue_list = []
         root = ET.fromstring(f.read())
         node = root.find('issues')
         for issuenode in node.findall('issue'):
-            issue_list.append(issuenode.get('label'))
-        return '\n'.join(issue_list)
+            if issuenode.get('state') == 'deleted':
+                del_issue_list.append(issuenode.get('label'))
+            elif issuenode.get('state') == 'added':
+                add_issue_list.append(issuenode.get('label'))
+            else:
+                chn_issue_list.append(issuenode.get('label'))
+        string = 'added:\n----------\n' + '\n'.join(add_issue_list) + \
+            '\n\nchanged:\n----------\n' + '\n'.join(chn_issue_list) + \
+            '\n\ndeleted:\n----------\n' + '\n'.join(del_issue_list)
+        return string
     return f.read()
 
 def server_diff_noex(apiurl,
                 old_project, old_package, old_revision,
                 new_project, new_package, new_revision,
-                unified=False, missingok=False, meta=False, expand=True, onlyissues=False):
+                unified=False, missingok=False, meta=False, expand=True, onlyissues=False, xml=False):
     try:
         return server_diff(apiurl,
                             old_project, old_package, old_revision,
                             new_project, new_package, new_revision,
-                            unified, missingok, meta, expand, onlyissues)
+                            unified, missingok, meta, expand, onlyissues, True, xml)
     except HTTPError as e:
         msg = None
         body = None
@@ -4892,8 +5025,11 @@ def server_diff_noex(apiurl,
             return rdiff
 
 
-def request_diff(apiurl, reqid):
-    u = makeurl(apiurl, ['request', reqid], query={'cmd': 'diff'} )
+def request_diff(apiurl, reqid, superseded_reqid=None):
+    query = {'cmd': 'diff'}
+    if superseded_reqid:
+        query['diff_to_superseded'] = superseded_reqid
+    u = makeurl(apiurl, ['request', reqid], query)
 
     f = http_POST(u)
     return f.read()
@@ -5002,12 +5138,8 @@ def checkout_package(apiurl, project, package,
 
     if not prj_dir:
         prj_dir = olddir
-    else:
-        if sys.platform[:3] == 'win':
-            prj_dir = prj_dir[:2] + prj_dir[2:].replace(':', ';')
-        else:
-            if conf.config['checkout_no_colon']:
-                prj_dir = prj_dir.replace(':', '/')
+    elif conf.config['checkout_no_colon']:
+        prj_dir = prj_dir.replace(':', '/')
 
     root_dots = '.'
     if conf.config['checkout_rooted']:
@@ -5052,7 +5184,17 @@ def checkout_package(apiurl, project, package,
 
     # before we create directories and stuff, check if the package actually
     # exists
-    show_package_meta(apiurl, quote_plus(project), quote_plus(package), meta)
+    meta_data = b''.join(show_package_meta(apiurl, quote_plus(project), quote_plus(package)))
+    root = ET.fromstring(meta_data)
+    if root.find('scmsync') != None and root.find('scmsync').text != None:
+        if not os.path.isfile('/usr/lib/obs/service/obs_scm_bridge'):
+            raise oscerr.OscIOError(None, 'Install the obs-scm-bridge package to work on packages managed in scm (git)!')
+        scm_url = root.find('scmsync').text
+        directory = make_dir(apiurl, project, package, pathname, prj_dir, conf.config['do_package_tracking'], outdir)
+        os.putenv("OSC_VERSION", get_osc_version())
+        run_external(['/usr/lib/obs/service/obs_scm_bridge', '--outdir', directory, '--url', scm_url])
+        Package.init_package(apiurl, project, package, directory, size_limit, meta, progress_obj, scm_url)
+        return
 
     isfrozen = False
     if expand_link:
@@ -5106,7 +5248,7 @@ def replace_pkg_meta(pkgmeta, new_name, new_prj, keep_maintainers = False,
             root.remove(dp)
     return ET.tostring(root, encoding=ET_ENCODING)
 
-def link_to_branch(apiurl, project,  package):
+def link_to_branch(apiurl, project, package):
     """
      convert a package with a _link + project.diff to a branch
     """
@@ -5137,7 +5279,7 @@ def link_pac(src_project, src_package, dst_project, dst_package, force, rev='', 
             meta_change = True
     except HTTPError as e:
         if e.code != 404:
-           raise
+            raise
         meta_change = True
     if meta_change:
         if missing_target:
@@ -5211,19 +5353,28 @@ def link_pac(src_project, src_package, dst_project, dst_package, force, rev='', 
     http_PUT(u, data=link_template)
     print('Done.')
 
-def aggregate_pac(src_project, src_package, dst_project, dst_package, repo_map = {}, disable_publish = False, nosources = False):
+
+def aggregate_pac(src_project, src_package, dst_project, dst_package, repo_map=None,
+                  disable_publish=False, nosources=False, repo_check=True):
     """
     aggregate package
      - "src" is the original package
      - "dst" is the "aggregate" package that we are creating here
      - "map" is a dictionary SRC => TARGET repository mappings
+     - "repo_check" determines if presence of repos in the source and destination repos is checked
     """
     meta_change = False
     dst_meta = ''
     apiurl = conf.config['apiurl']
+    repo_map = repo_map or {}
+
+    # we need to remove :flavor from the package names when accessing meta
+    src_package_meta = src_package.split(":")[0]
+    dst_package_meta = dst_package.split(":")[0]
+
     try:
         dst_meta = meta_exists(metatype='pkg',
-                               path_args=(quote_plus(dst_project), quote_plus(dst_package)),
+                               path_args=(quote_plus(dst_project), quote_plus(dst_package_meta)),
                                template_args=None,
                                create_new=False, apiurl=apiurl)
         root = ET.fromstring(parse_meta_to_string(dst_meta))
@@ -5232,12 +5383,40 @@ def aggregate_pac(src_project, src_package, dst_project, dst_package, repo_map =
             meta_change = True
     except HTTPError as e:
         if e.code != 404:
-           raise
+            raise
         meta_change = True
 
+    if repo_check:
+        src_repos = set(get_repositories_of_project(apiurl, src_project))
+        dst_repos = set(get_repositories_of_project(apiurl, dst_project))
+
+        if repo_map:
+            map_from = set(repo_map.keys())
+            map_to = set(repo_map.values())
+
+            # only repos that do not exist in src/dst remain
+            delta_from = map_from - src_repos
+            delta_to = map_to - dst_repos
+
+            if delta_from or delta_to:
+                msg = ["The following repos in repo map do not exist"]
+                if delta_from:
+                    msg += ["  Source repos: " + ", ".join(sorted(delta_from))]
+                if delta_to:
+                    msg += ["  Destination repos: " + ", ".join(sorted(delta_to))]
+                raise oscerr.OscBaseError("\n".join(msg))
+        else:
+            # no overlap between src and dst repos leads to the 'broken: missing repositories: <src_project>' message
+            if not src_repos & dst_repos:
+                msg = [
+                    "The source and the destination project do not have any repository names in common.",
+                    "Use repo map to specify actual repository mapping.",
+                ]
+                raise oscerr.OscBaseError("\n".join(msg))
+
     if meta_change:
-        src_meta = show_package_meta(apiurl, src_project, src_package)
-        dst_meta = replace_pkg_meta(src_meta, dst_package, dst_project)
+        src_meta = show_package_meta(apiurl, src_project, src_package_meta)
+        dst_meta = replace_pkg_meta(src_meta, dst_package_meta, dst_project)
         meta_change = True
 
     if disable_publish:
@@ -5251,12 +5430,12 @@ def aggregate_pac(src_project, src_package, dst_project, dst_package, repo_map =
         dst_meta = ET.tostring(root, encoding=ET_ENCODING)
     if meta_change:
         edit_meta('pkg',
-                  path_args=(dst_project, dst_package),
+                  path_args=(dst_project, dst_package_meta),
                   data=dst_meta)
 
     # create the _aggregate file
     # but first, make sure not to overwrite an existing one
-    if '_aggregate' in meta_get_filelist(apiurl, dst_project, dst_package):
+    if '_aggregate' in meta_get_filelist(apiurl, dst_project, dst_package_meta):
         print(file=sys.stderr)
         print('_aggregate file already exists...! Aborting', file=sys.stderr)
         sys.exit(1)
@@ -5285,7 +5464,7 @@ def aggregate_pac(src_project, src_package, dst_project, dst_package, repo_map =
 </aggregatelist>
 """
 
-    u = makeurl(apiurl, ['source', dst_project, dst_package, '_aggregate'])
+    u = makeurl(apiurl, ['source', dst_project, dst_package_meta, '_aggregate'])
     http_PUT(u, data=aggregate_template)
     print('Done.')
 
@@ -5384,8 +5563,8 @@ def branch_pkg(apiurl, src_project, src_package, nodevelproject=False, rev=None,
     except HTTPError as e:
         root = ET.fromstring(e.read())
         if missingok:
-           if root and root.get('code') == "not_missing":
-              raise oscerr.NotMissing("Package exists already via project link, but link will point to given project")
+            if root and root.get('code') == "not_missing":
+                raise oscerr.NotMissing("Package exists already via project link, but link will point to given project")
         summary = root.find('summary')
         if summary is None:
             raise oscerr.APIError('unexpected response:\n%s' % ET.tostring(root, encoding=ET_ENCODING))
@@ -5572,30 +5751,43 @@ def get_distibutions(apiurl, discon=False):
                 rmap = {}
                 rmap['name'] = node.get('name').replace('DISCONTINUED:', '').replace(':', ' ')
                 rmap['project'] = node.get('name')
-                r.append (result_line_templ % rmap)
+                r.append(result_line_templ % rmap)
 
         r.insert(0, 'distribution              project')
         r.insert(1, '------------              -------')
 
     else:
-        result_line_templ = '%(name)-25s %(project)-25s %(repository)-25s %(reponame)s'
         f = http_GET(makeurl(apiurl, ['distributions']))
         root = ET.fromstring(b''.join(f))
 
+        distlist = []
         for node in root.findall('distribution'):
-            rmap = {}
-            for node2 in node.findall('name'):
-                rmap['name'] = node2.text
-            for node3 in node.findall('project'):
-                rmap['project'] = node3.text
-            for node4 in node.findall('repository'):
-                rmap['repository'] = node4.text
-            for node5 in node.findall('reponame'):
-                rmap['reponame'] = node5.text
-            r.append(result_line_templ % rmap)
+            dmap = {}
+            for child in node:
+                if child.tag in ('name', 'project', 'repository', 'reponame'):
+                   dmap[child.tag] = child.text
+            dmap['distribution'] = dmap.pop('name')
+            distlist.append(dmap)
 
-        r.insert(0, 'distribution              project                   repository                reponame')
-        r.insert(1, '------------              -------                   ----------                --------')
+        # pretty printing table
+        headers = ('distribution', 'project', 'repository', 'reponame')
+        maxlen = [len(h) for h in headers]
+        for d in distlist:
+            for i,field in enumerate(headers):
+                maxlen[i] = max(maxlen[i], len(d[field]))
+
+        def format_row(dist, proj, repotype, reponame):
+            result_line_templ = '%-*s  %-*s  %-*s  %-s'
+            return result_line_templ % (
+                maxlen[0], dist,
+                maxlen[1], proj,
+                maxlen[2], repotype,
+                reponame
+                )
+        r.append(format_row('distribution', 'project', 'repository', 'reponame'))
+        r.append(format_row('-'*maxlen[0], '-'*maxlen[1], '-'*maxlen[2], '-'*maxlen[2]))
+        for d in distlist:
+            r.append(format_row(d['distribution'], d['project'], d['repository'], d['reponame']))
 
     return r
 
@@ -5683,7 +5875,7 @@ def get_binarylist_published(apiurl, prj, repo, arch):
     return r
 
 
-def show_results_meta(apiurl, prj, package=None, lastbuild=None, repository=[], arch=[], oldstate=None, multibuild=False, locallink=False):
+def show_results_meta(apiurl, prj, package=None, lastbuild=None, repository=[], arch=[], oldstate=None, multibuild=False, locallink=False, code=None):
     query = []
     if package:
         query.append('package=%s' % quote_plus(package))
@@ -5695,6 +5887,8 @@ def show_results_meta(apiurl, prj, package=None, lastbuild=None, repository=[], 
         query.append('multibuild=1')
     if locallink:
         query.append('locallink=1')
+    if code:
+        query.append('code=%s' % quote_plus(code))
     for repo in repository:
         query.append('repository=%s' % quote_plus(repo))
     for a in arch:
@@ -5727,7 +5921,7 @@ def result_xml_to_dicts(xml):
         rmap['repostate'] = node.get('code')
         rmap['pkg'] = rmap['package'] = rmap['pac'] = ''
         rmap['code'] = node.get('code')
-        rmap['details'] = ''
+        rmap['details'] = node.get('details')
         # the way we currently use this function, there should be
         # always a status element
         snodes = node.findall('status')
@@ -5748,6 +5942,10 @@ def result_xml_to_dicts(xml):
             details = statusnode.find('details')
             if details is not None:
                 smap['details'] = details.text
+            if rmap['code'] == 'broken':
+                # real error just becomes visible in details/verbose
+                smap['code'] = rmap['code']
+                smap['details'] = "repository: " + rmap['details']
             yield smap, is_multi
 
 
@@ -5767,6 +5965,7 @@ def get_results(apiurl, project, package, verbose=False, printJoin='', *args, **
     printed = False
     multibuild_packages = kwargs.pop('multibuild_packages', [])
     show_excluded = kwargs.pop('showexcl', False)
+    code_filter = kwargs.get('code')
     for results in get_package_results(apiurl, project, package, **kwargs):
         r = []
         for res, is_multi in result_xml_to_dicts(results):
@@ -5780,7 +5979,7 @@ def get_results(apiurl, project, package, verbose=False, printJoin='', *args, **
                 if len(l) != 2 or l[1] not in multibuild_packages:
                     continue
             res['status'] = res['code']
-            if verbose and res['details'] != '':
+            if verbose and res['details'] is not None:
                 if res['code'] in ('unresolvable', 'expansion error'):
                     lines = res['details'].split(',')
                     res['status'] += ': \n      ' + '\n     '.join(lines)
@@ -5799,11 +5998,14 @@ def get_results(apiurl, project, package, verbose=False, printJoin='', *args, **
                     res['status'] += '(unpublished)'
                 else:
                     res['status'] += '*'
-
-            if is_multi:
-                r.append(result_line_mb_templ % res)
-            else:
-                r.append(result_line_templ % res)
+            # we need to do the code filtering again, because result_xml_to_dicts returns the code
+            # of the repository if the result is already prefiltered by the backend. So we need
+            # to filter out the repository states.
+            if code_filter is None or code_filter == res['code']:
+                if is_multi:
+                    r.append(result_line_mb_templ % res)
+                else:
+                    r.append(result_line_templ % res)
 
         if printJoin:
             if printed:
@@ -5852,11 +6054,11 @@ def get_package_results(apiurl, project, package=None, wait=False, *args, **kwar
         if not wait or not waiting:
             break
         else:
-            yield xml 
+            yield xml
     yield xml
 
 
-def get_prj_results(apiurl, prj, hide_legend=False, csv=False, status_filter=None, name_filter=None, arch=None, repo=None, vertical=None, show_excluded=None):
+def get_prj_results(apiurl, prj, hide_legend=False, csv=False, status_filter=None, name_filter=None, arch=None, repo=None, vertical=None, show_excluded=None, brief=False):
     #print '----------------------------------------'
     global buildstatus_symbols
 
@@ -5864,6 +6066,9 @@ def get_prj_results(apiurl, prj, hide_legend=False, csv=False, status_filter=Non
 
     f = show_prj_results_meta(apiurl, prj)
     root = ET.fromstring(b''.join(f))
+
+    if name_filter is not None:
+        name_filter = re.compile(name_filter)
 
     pacs = []
     # sequence of (repo,arch) tuples
@@ -5886,6 +6091,8 @@ def get_prj_results(apiurl, prj, hide_legend=False, csv=False, status_filter=Non
             state = "outdated"
         else:
             state = node.get('state')
+        if node.get('details'):
+            state += ' details: ' + node.get('details')
         tg = (node.get('repository'), node.get('arch'), state)
         targets.append(tg)
         for pacnode in node.findall('status'):
@@ -5896,8 +6103,8 @@ def get_prj_results(apiurl, prj, hide_legend=False, csv=False, status_filter=Non
     targets.sort()
 
     # filter option
+    filters = []
     if status_filter or name_filter or not show_excluded:
-
         pacs_to_show = []
         targets_to_show = []
 
@@ -5907,24 +6114,24 @@ def get_prj_results(apiurl, prj, hide_legend=False, csv=False, status_filter=Non
                 # a list is needed because if status_filter == "U"
                 # we have to filter either an "expansion error" (obsolete)
                 # or an "unresolvable" state
-                filters = []
                 for txt, sym in buildstatus_symbols.items():
                     if sym == status_filter:
                         filters.append(txt)
-                for filt_txt in filters:
-                    for pkg in status.keys():
-                        for repo in status[pkg].keys():
-                            if status[pkg][repo] == filt_txt:
-                                if not name_filter:
-                                    pacs_to_show.append(pkg)
-                                    targets_to_show.append(repo)
-                                elif name_filter in pkg:
-                                    pacs_to_show.append(pkg)
-
+            else:
+                filters.append(status_filter)
+            for filt_txt in filters:
+                for pkg in status.keys():
+                    for repo in status[pkg].keys():
+                        if status[pkg][repo] == filt_txt:
+                            if not name_filter:
+                                pacs_to_show.append(pkg)
+                                targets_to_show.append(repo)
+                            elif name_filter.search(pkg) is not None:
+                                pacs_to_show.append(pkg)
         #filtering for Package Name
         elif name_filter:
             for pkg in pacs:
-                if name_filter in pkg:
+                if name_filter.search(pkg) is not None:
                     pacs_to_show.append(pkg)
 
         #filter non building states
@@ -5954,6 +6161,14 @@ def get_prj_results(apiurl, prj, hide_legend=False, csv=False, status_filter=Non
         for pac in pacs:
             row = [pac] + [status[pac][tg] for tg in targets if tg in status[pac]]
             r.append(';'.join(row))
+        return r
+
+    if brief:
+        for pac, repo_states in status.items():
+            for repo, state in repo_states.items():
+                if filters and state not in filters:
+                    continue
+                r.append('%s %s %s %s' % (pac, repo[0], repo[1], state))
         return r
 
     if not vertical:
@@ -5992,7 +6207,7 @@ def get_prj_results(apiurl, prj, hide_legend=False, csv=False, status_filter=Non
     else:
         offset = 0
         for tg in targets:
-            r.append('| ' * offset + '%s %s (%s)'%tg )
+            r.append('| ' * offset + '%s %s (%s)' % tg)
             offset += 1
 
         for pac in pacs:
@@ -6016,7 +6231,7 @@ def get_prj_results(apiurl, prj, hide_legend=False, csv=False, status_filter=Non
 
         line = []
         for i in range(0, len(targets)):
-            line.append(str(i%10))
+            line.append(str(i % 10))
         r.append(' '.join(line))
 
         r.append('')
@@ -6032,7 +6247,7 @@ def get_prj_results(apiurl, prj, hide_legend=False, csv=False, status_filter=Non
 
         if vertical:
             for i in range(0, len(targets)):
-                s = '%1d %s %s (%s)' % (i%10, targets[i][0], targets[i][1], targets[i][2])
+                s = '%1d %s %s (%s)' % (i % 10, targets[i][0], targets[i][1], targets[i][2])
                 if i < len(legend):
                     legend[i] += s
                 else:
@@ -6116,6 +6331,8 @@ def print_buildlog(apiurl, prj, package, repository, arch, offset=0, strip_time=
     def print_data(data, strip_time=False):
         if strip_time:
             data = buildlog_strip_time(data)
+        # hmm calling decode_it is a bit problematic because data might begin
+        # or end with an, for instance, incomplete utf-8 sequence
         sys.stdout.write(decode_it(data.translate(all_bytes, remove_bytes)))
 
     # to protect us against control characters
@@ -6259,12 +6476,12 @@ def get_buildhistory(apiurl, prj, package, repository, arch, format = 'text', li
         t = time.gmtime(int(node.get('time')))
         t = time.strftime('%Y-%m-%d %H:%M:%S', t)
         if duration == None:
-           duration = ""
+            duration = ""
 
         if format == 'csv':
             r.append('%s|%s|%s|%s.%d|%s' % (t, srcmd5, rev, versrel, bcnt, duration))
         else:
-            bversrel='%s.%d' % (versrel, bcnt)
+            bversrel = '%s.%d' % (versrel, bcnt)
             r.append('%s   %s    %s %s %s' % (t, srcmd5, bversrel.ljust(16)[:16], rev, duration.rjust(10)))
 
     if format == 'text':
@@ -6474,6 +6691,21 @@ def store_read_package(dir):
         raise oscerr.NoWorkingCopy(msg)
     return p
 
+def store_read_scmurl(dir):
+    global store
+
+    url_file = os.path.join(dir, store, '_scm')
+    if not os.path.exists(url_file):
+        return
+    try:
+        p = open(url_file).readlines()[0].strip()
+    except IOError:
+        msg = 'Error: \'%s\' is not an osc package working copy' % os.path.abspath(dir)
+        if os.path.exists(os.path.join(dir, '.svn')):
+            msg += '\nTry svn instead of osc.'
+        raise oscerr.NoWorkingCopy(msg)
+    return p
+
 def store_read_apiurl(dir, defaulturl=True):
     global store
 
@@ -6615,32 +6847,25 @@ def cmdbuild(apiurl, cmd, project, package=None, arch=None, repo=None, code=None
     return root.get('code')
 
 
-def parseRevisionOption(string):
+def parseRevisionOption(string, allow_md5=True):
     """
     returns a tuple which contains the revisions
     """
 
+    revisions = [None, None]
     if string:
-        if ':' in string:
-            splitted_rev = string.split(':')
-            try:
-                for i in splitted_rev:
-                    int(i)
-                return splitted_rev
-            except ValueError:
-                print('your revision \'%s\' will be ignored' % string, file=sys.stderr)
-                return None, None
-        else:
-            if string.isdigit():
-                return string, None
-            elif string.isalnum() and len(string) == 32:
-                # could be an md5sum
-                return string, None
-            else:
-                print('your revision \'%s\' will be ignored' % string, file=sys.stderr)
-                return None, None
-    else:
-        return None, None
+        parts = string.split(':')
+
+        if len(parts) > 2:
+            raise oscerr.OscInvalidRevision(string)
+
+        for i, revision in enumerate(parts, 0):
+            if revision.isdigit() or (allow_md5 and revision.isalnum() and len(revision) == 32):
+                revisions[i] = revision
+            elif revision != '' and revision != 'latest':
+                raise oscerr.OscInvalidRevision(string)
+
+    return tuple(revisions)
 
 def checkRevision(prj, pac, revision, apiurl=None, meta=False):
     """
@@ -6653,7 +6878,7 @@ def checkRevision(prj, pac, revision, apiurl=None, meta=False):
     if not apiurl:
         apiurl = conf.config['apiurl']
     try:
-        if int(revision) > int(show_upstream_rev(apiurl, prj, pac, meta)) \
+        if int(revision) > int(show_upstream_rev(apiurl, prj, pac, meta=meta)) \
            or int(revision) <= 0:
             return False
         else:
@@ -6664,7 +6889,11 @@ def checkRevision(prj, pac, revision, apiurl=None, meta=False):
 def build_table(col_num, data = [], headline = [], width=1, csv = False):
     """
     This method builds a simple table.
-    Example1: build_table(2, ['foo', 'bar', 'suse', 'osc'], ['col1', 'col2'], 2)
+
+    Example::
+
+        build_table(2, ['foo', 'bar', 'suse', 'osc'], ['col1', 'col2'], 2)
+
         col1  col2
         foo   bar
         suse  osc
@@ -6698,7 +6927,7 @@ def build_table(col_num, data = [], headline = [], width=1, csv = False):
             table.append(row)
         # there is no need to justify the entries of the last column
         # or when generating csv
-        if i == col_num -1 or csv:
+        if i == col_num - 1 or csv:
             row.append(itm)
         else:
             row.append(itm.ljust(longest_col[i]))
@@ -6773,12 +7002,21 @@ def search(apiurl, queries=None, **kwargs):
         res[urlpath] = ET.parse(f).getroot()
     return res
 
-def owner(apiurl, binary, mode="binary", attribute=None, project=None, usefilter=None, devel=None, limit=None):
+def owner(apiurl, search_term=None, mode="binary", attribute=None,
+          project=None, usefilter=None, devel=None, limit=None, binary=None):
     """
     Perform a binary package owner search. This is supported since OBS 2.4.
     """
+
+    # binary is just for API backward compatibility
+    if not ((search_term is None) ^ (binary is None)):
+        raise ValueError('Either specify search_term or binary')
+    elif binary is not None:
+        search_term = binary
+ 
     # find default project, if not specified
-    query = { mode: binary }
+    # mode can be "binary" or "package" atm
+    query = { mode: search_term }
     if attribute:
         query['attribute'] = attribute
     if project:
@@ -7008,12 +7246,12 @@ def setBugowner(apiurl, prj, pac, user=None, group=None):
                        template_args=None,
                        create_new=False)
     if user.startswith('group:'):
-        group=user.replace('group:', '')
-        user=None
+        group = user.replace('group:', '')
+        user = None
     if data:
         root = ET.fromstring(parse_meta_to_string(data))
         for group_element in root.getiterator('group'):
-            if  group_element.get('role') == "bugowner":
+            if group_element.get('role') == "bugowner":
                 root.remove(group_element)
         for person_element in root.getiterator('person'):
             if person_element.get('role') == "bugowner":
@@ -7083,7 +7321,7 @@ def stripETxml(node):
     node.tail = None
     if node.text != None:
         node.text = node.text.replace(" ", "").replace("\n", "")
-    for child in node.getchildren():
+    for child in node:
         stripETxml(child)
 
 def addGitSource(url):
@@ -7152,7 +7390,7 @@ def addDownloadUrlService(url):
     f.close()
 
 
-def addFiles(filenames, prj_obj = None):
+def addFiles(filenames, prj_obj = None, force=False):
     for filename in filenames:
         if not os.path.exists(filename):
             raise oscerr.OscIOError(None, 'file \'%s\' does not exist' % filename)
@@ -7211,7 +7449,7 @@ def addFiles(filenames, prj_obj = None):
         for filename in pac.todo:
             if filename in pac.skipped:
                 continue
-            if filename in pac.excluded:
+            if filename in pac.excluded and not force:
                 print('osc: warning: \'%s\' is excluded from a working copy' % filename, file=sys.stderr)
                 continue
             try:
@@ -7225,7 +7463,9 @@ def getPrjPacPaths(path):
     returns the path for a project and a package
     from path. This is needed if you try to add
     or delete packages:
-    Examples:
+
+    Examples::
+
         osc add pac1/: prj_dir = CWD;
                        pac_dir = pac1
         osc add /path/to/pac1:
@@ -7336,7 +7576,9 @@ def print_request_list(apiurl, project, package = None, states = ('new', 'review
     if not conf.config['check_for_request_on_action'] and not force:
         return
     requests = get_request_list(apiurl, project, package, req_state=states)
-    msg = 'Pending requests for %s: %s (%s)'
+    msg = '\nPending requests for %s: %s (%s)'
+    if sys.stdout.isatty():
+        msg = '\033[1m{}\033[0m'.format(msg)
     if package is None and len(requests):
         print(msg % ('project', project, len(requests)))
     elif len(requests):
@@ -7357,6 +7599,13 @@ def request_interactive_review(apiurl, request, initial_cmd='', group=None,
             return True
         except HTTPError as e:
             print('Server returned an error:', e, file=sys.stderr)
+            details = e.hdrs.get('X-Opensuse-Errorcode')
+            if details:
+                print(details, file=sys.stderr)
+            root = ET.fromstring(e.read())
+            summary = root.find('summary')
+            if summary is not None:
+                print(summary.text, file=sys.stderr)
             print('Try -f to force the state change', file=sys.stderr)
         return False
 
@@ -7497,7 +7746,7 @@ def request_interactive_review(apiurl, request, initial_cmd='', group=None,
                 create_comment(apiurl, 'request', comment, request.reqid)
             elif repl == 'b' and src_actions:
                 print_source_buildstatus(src_actions)
-            elif repl =='li' and src_actions:
+            elif repl == 'li' and src_actions:
                 safe_get_rpmlint_log(src_actions)
             elif repl == 'e' and editable_actions:
                 # this is only for editable actions
@@ -7723,8 +7972,8 @@ def run_external(filename, *args, **kwargs):
 def return_external(filename, *args, **kwargs):
     """Executes the program filename via subprocess.check_output.
 
-    *args are additional arguments which are passed to the
-    program filename. **kwargs specify additional arguments for
+    ``*args`` are additional arguments which are passed to the
+    program filename. ``**kwargs`` specify additional arguments for
     the subprocess.check_output function.
     if no args are specified the plain filename is passed
     to subprocess.check_output (this can be used to execute a shell
@@ -7732,7 +7981,6 @@ def return_external(filename, *args, **kwargs):
     to the subprocess.check_output function.
 
     Returns the output of the command.
-
     """
     if args:
         cmd = [filename] + list(args)
@@ -7832,7 +8080,7 @@ def print_comments(apiurl, kind, *args):
         for comment in comments:
             print(indent, end='')
             print('(', comment.get('id'), ')', 'On', comment.get('when'), comment.get('who'), 'wrote:')
-            text = indent + comment.text.replace('\r\n',' \n')
+            text = indent + comment.text.replace('\r\n', ' \n')
             print(('\n' + indent).join(text.split('\n')))
             print()
             print_rec([c for c in root if c.get('parent') == comment.get('id')], indent + '  ')

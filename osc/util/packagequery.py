@@ -26,7 +26,7 @@ class PackageQueries(dict):
         """Adds package query to dict if it is of the correct architecture and
         is newer (has a greater version) than the currently assigned package.
 
-        @param a PackageQuery
+        :param query: a PackageQuery
         """
         self.__setitem__(query.name(), query)
 
@@ -87,7 +87,7 @@ class PackageQuery:
         f = open(filename, 'rb')
         magic = f.read(7)
         f.seek(0)
-        if magic[:4] == '\xed\xab\xee\xdb':
+        if magic[:4] == b'\xed\xab\xee\xdb':
             from . import rpmquery
             f.close()
             return rpmquery.RpmQuery.queryhdrmd5(filename)
@@ -158,8 +158,8 @@ class PackageQueryResult:
 
         epoch = self.epoch()
         if epoch is not None and epoch != 0:
-            evr = epoch + b":" + evr 
-        return evr 
+            evr = epoch + b":" + evr
+        return evr
 
 
 def cmp(a, b):

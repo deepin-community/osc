@@ -17,6 +17,7 @@ from .oscsslexcp import NoSecureSSLError
 from osc.util.cpio import CpioError
 from osc.util.packagequery import PackageError
 from osc.util.helper import decode_it
+from osc.OscConfigParser import configparser
 
 try:
     from M2Crypto.SSL.Checker import SSLVerificationError
@@ -49,6 +50,8 @@ except ImportError:
 def catchterm(*args):
     raise oscerr.SignalInterrupt
 
+
+# Signals which should terminate the program safely
 for name in 'SIGBREAK', 'SIGHUP', 'SIGTERM':
     num = getattr(signal, name, None)
     if num:
@@ -134,7 +137,11 @@ def run(prg, argv=None):
     except HTTPException as e:
         print(e, file=sys.stderr)
     except URLError as e:
-        print('Failed to reach a server:\n', e.reason, file=sys.stderr)
+        msg = 'Failed to reach a server'
+        if hasattr(e, '_osc_host_port'):
+            msg += ' (%s)' % e._osc_host_port
+        msg += ':\n'
+        print(msg, e.reason, file=sys.stderr)
     except IOError as e:
         # ignore broken pipe
         if e.errno != errno.EPIPE:
@@ -144,7 +151,9 @@ def run(prg, argv=None):
             raise
         print(e, file=sys.stderr)
     except (oscerr.ConfigError, oscerr.NoConfigfile) as e:
-        print(e.msg, file=sys.stderr)
+        print(e, file=sys.stderr)
+    except configparser.Error as e:
+        print(e.message, file=sys.stderr)
     except oscerr.OscIOError as e:
         print(e.msg, file=sys.stderr)
         if getattr(prg.options, 'debug', None) or \

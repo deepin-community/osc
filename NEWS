@@ -1,3 +1,185 @@
+0.182.1
+  - Fix crash due to list having no copy attribute on python2
+  - Fix crash in ssh auth when .ssh directory is missing
+
+0.182.0
+  - fix build on SLE12 / python 2.7
+  - SSH auth: Fix getallmatchingheaders() output to correspond with headers.get_all()
+  - send HTTP header Accept: application/xml
+  - git_version: return version from the source code if there's no matching tag
+
+0.181.0
+  - fix crash when 'pass' is not set in the config file
+  - add missing attributes to Package when scm_url is set
+  - fix failure to create config in current dir
+  - update list of considered file names for ssh key autodetection
+  - allow users to prefer ssh key over password auth
+  - ssh: recognize gpg keys (yubikey usage)
+  - fix operating on _project meta
+  - revert "interpretation of string literals in messages" that broke unicode handling
+  - fix product build rpm caching
+  - enable md5 revisions in osc log
+  - parseRevisionOption(): raise an exception on invalid revisions
+
+0.180.0
+  - warn when trying to commit a prj/pac managed in scm
+  - fix crash on "osc up" for git based package/projects
+  - don't traceback on invalid credentials manager
+  - improve README, rename it to README.md
+  - declare OscHTTPSignatureAuthHandler as a new-style class
+  - remove illegal character in comment
+
+0.179.0
+  - signature (ssh key) authetication fixes (RSA key support, skip binary files)
+  - commandline: handle calls without arguments gracefully
+  - use percent-quoted url for download url generation
+  - osc co/up: highlight pending requests' header
+  - get_results(): fix check for empty details
+  - another exception for github URLs for "osc add"
+  - update Sphinx configuration, documentation fixes
+  - support flavors in aggregatepac
+  - check if repos provided to aggregatepac command exist
+  - several coding style fixes
+
+0.178.0
+  - EXPERIMENTAL: git repository handling
+    * init command is working inside of a git repository
+    * downloadassets command fetches references assets from build description
+    * checkout is cloning from git
+  - EXPERIMENTAL: signature (ssh key) authetication
+    * allow to configure 'sshkey' option in the config
+    * try to guess ssh key from the keys added to ssh-agent
+    * rename OscHTTPBasicAuthHandler to OscHTTPAuthHandler
+    * simplify bad auth retry workaround needed for old python versions
+  - add support for building preinstall images
+  - add support for building Helm charts
+  - show the md5s that are failing to validate after fetching a package
+  - add missing space to copypac completion
+  - never require login in the help command
+  - linkdiff: raise an exception when an added file is missing
+  - run tests via calling 'setup.py test'
+  - several coding style fixes
+
+0.177.0
+  - switch to python3 in osc-wrapper and make python3 explicit
+  - allow formatting of the sccache uri
+  - show repository state and details
+  - a few minor fixes and improvements in credentials handling
+  - order credential managers by priority
+  - kernel keyring is now supported as credential manager
+  - support regex based name filtering in core.get_prj_results()
+  - revision parsing parseRevisionOption(): cleanup and make logic consistent
+  - use sr_ids[0] for superseding (fixes issues with superseding requests
+    containing many packages
+  - download logs and metadata in subdirs named by packages when osc getbinaries
+    is issued on project level or in multibuild case
+
+0.176.0
+  - add -F option to osc submitreq
+  - add --verbose option to build command
+  - fix getbinaries command to fetch also multibuild packages
+  - fix getbinaries -M/--multibuild-package option usage
+  - skip fetching metadata and logs in the getbinaries command
+  - do not download a bdep with a hdrmd5 from the api by default
+  - re-download file from API when hdrmd5 doesn't match
+  - honor --download-api-only option
+  - remove Windows from the supported operating systems
+  - fix license in setup.py
+  - add py3.10 and py3.11 to the classifiers in setup.py
+  - use the latest version of COPYING file from gnu.org
+  - fix crash on terminal resize during download
+  - do not fail with a traceback in case of a config error
+  - preserve oscrc symlink when writing conf file
+  - escape % character in binary download URLs
+  - fix printing paths to built debian packages
+
+0.175.0
+  - do not crash when running "osc search --binary --verbose foo"
+  - don't run source services when building outside of an OSC package working copy
+  - fix XDG_CONFIG_HOME
+  - offer a force ("f") choice in metafile.edit's error handling code path
+  - fix XPath used in search requests
+  - add support for creating a workflow token via "osc token"
+  - handle missing os.sysconf more gracefully
+  - detachbranch: remove _link when link target got removed
+  - improve error message in case of an URLError
+  - fix downloading from mirrors
+  - avoid sending entire projects on "osc mr"
+  - fix hdmrd5 check of local cached files
+  - improve logic for conffile mode handling
+
+0.174.0
+  - fix password deletion via "osc config -d <apiurl> pass"
+  - support changing the password store via "osc config <apiurl>
+    --select-password-store")
+  - support slash syntax in osc browse ("osc browse prj/pkg" is equivalent to
+    "osc browse prj pkg")
+  - fix the commit of a frozen package wc
+  - fix local product builds using obsrepositories:/ directives
+  - print a meaningful message when trying to a commit a non-existent package
+
+0.173.0
+  - add showlinked command to show all references of packages linking to a given one
+  - add build --shell-after-build flag. It can also be set via .oscrc.
+  - add build --stage flag. Useful for example for fixing file lists and just
+    running the install section to see the result of it (use --stage=i=).
+    Check the help for more details.
+  - allow to run build script as non-root, by setting su-wrapper empty
+    => osc is not guessing anymore if user builds are wanted
+  - add support for cross arch local build using a sysroot
+  - support slash notation in "osc creq -a <action type> args"
+  - add "--force" option to the "osc add" command (can be used to override
+    the exclude_glob config option)
+  - support the commit of arbitrary sized files
+  - add support for sccache
+
+0.172.0
+  - support --lastsucceeded/--last-succeeded in "osc buildlog", "osc
+    remotebuildlog" + friends (perform the corresponding operation on
+    the build log of the last successful build)
+  - fix pypi deployment via Travis CI
+  - several fixes in request related code paths (no double html_escape
+    of a request's description etc.)
+  - support local builds in a systemd-nspawn container
+  - fix potential TypeErrors+UnicodeEncodeErrors in the util.cpio and
+    util.ar modules
+  - support local flatpak builds (requires a recent build version)
+  - "osc init <prj>" works for a non-existent (server-side) project <prj>
+  - .old dir support for source services so that some services have access
+    to the results of a previous service run
+
+0.171.0
+  - maintainer search: lookup via package name by default and binary as fallback
+  - fix crash on console resize when downloading files during build
+  - add proper repourls to osc reporuls
+  - new command osc releaserequest: This command is used to transfer sources and
+    binaries without rebuilding them.
+    It requires defined release targets set to trigger="manual".
+  - some improvements on output of help and error messages
+
+0.170
+  - fix code for python3.8 and python3.9
+  - remove dead code
+  - fix tests
+  - don't use chardet to guess encoding. utf-8 or latin-1 is now assumed
+    This will speed up decoding (bsc#1173926)
+  - escape sequences are interpreted correctly on -m
+    osc sr -m "1st line\n2nd line"
+	results in
+    1st line
+    2nd line
+  - add status filter to osc results
+  - add --brief to osc prjresults
+	Gives:
+	build openSUSE_Leap_15.1 x86_64 succeeded
+	build openSUSE_Leap_15.0 x86_64 succeeded
+	build openSUSE_Leap_15.0 armv7l unresolvable
+	build openSUSE_Factory_ARM armv7l succeeded
+	build openSUSE_Factory_ARM aarch64 succeeded
+  - osc prjresults -s <status>: status can now be the long text like "succeeded", "failed"
+  - improve error message if osc service <servicename> is not run in working directory
+  - web links are now also printed for osc mr when print_web_links=1 is set
+
 0.169.1
   - add --ccache option to osc getbinaries
 

@@ -5,11 +5,13 @@ information instead of scanning individual rpms."""
 import gzip
 import os.path
 
-# cElementTree can be standard or 3rd-party depending on python version
 try:
+    # Works up to Python 3.8, needed for Python < 3.3 (inc 2.7)
     from xml.etree import cElementTree as ET
 except ImportError:
-    import cElementTree as ET
+    # will import a fast implementation from 3.3 onwards, needed
+    # for 3.9+
+    from xml.etree import ElementTree as ET
 
 # project modules
 import osc.util.rpmquery
@@ -19,19 +21,20 @@ def namespace(name):
     return "{http://linux.duke.edu/metadata/%s}" % name
 
 OPERATOR_BY_FLAGS = {
-    "EQ" : "=",
-    "LE" : "<=",
-    "GE" : ">=",
-    "LT" : "<",
-    "GT" : ">"
+    "EQ": "=",
+    "LE": "<=",
+    "GE": ">=",
+    "LT": "<",
+    "GT": ">"
 }
 
 def primaryPath(directory):
     """Returns path to the primary repository data file.
 
-    @param directory repository directory that contains the repodata subdirectory
-    @return str path to primary repository data file
-    @raise IOError if repomd.xml contains no primary location
+    :param directory: repository directory that contains the repodata subdirectory
+    :return:  path to primary repository data file
+    :rtype: str
+    :raise IOError: if repomd.xml contains no primary location
     """
     metaDataPath = os.path.join(directory, "repodata", "repomd.xml")
     elementTree = ET.parse(metaDataPath)
@@ -53,10 +56,9 @@ def queries(directory):
     """Returns a list of RepoDataQueries constructed from the repodata under
     the directory.
 
-    @param directory path to a repository directory (parent directory of
-                     repodata directory)
-    @return list of RepoDataQueryResult instances
-    @raise IOError if repomd.xml contains no primary location
+    :param directory: path to a repository directory (parent directory of repodata directory)
+    :return: list of RepoDataQueryResult instances
+    :raise IOError: if repomd.xml contains no primary location
     """
     path = primaryPath(directory)
 
@@ -97,9 +99,8 @@ class RepoDataQueryResult(osc.util.packagequery.PackageQueryResult):
         """Creates a RepoDataQueryResult from the a package Element under a metadata
         Element in a primary.xml file.
 
-        @param directory repository directory path.  Used to convert relative
-                         paths to full paths.
-        @param element package Element
+        :param directory: repository directory path. Used to convert relative paths to full paths.
+        :param element: package Element
         """
         self.__directory = os.path.abspath(directory)
         self.__element = element

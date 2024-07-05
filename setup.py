@@ -1,24 +1,15 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 from distutils.core import setup
 import distutils.core
 from distutils.command import build, install_data
 import gzip
 import os.path
-import sys
 
 import setuptools
 
 import osc.core
 from osc import commandline
-
-# optional support for py2exe
-try:
-    import py2exe
-
-    HAVE_PY2EXE = True
-except:
-    HAVE_PY2EXE = False
 
 
 class build_osc(build.build, object):
@@ -45,29 +36,6 @@ class build_osc(build.build, object):
         self.build_man_page()
 
 
-# Support for documentation (sphinx)
-class build_docs(distutils.core.Command):
-    description = 'builds documentation using sphinx'
-    user_options = []
-
-    def initialize_options(self):
-        self.built_docs = None
-
-    def finalize_options(self):
-        self.set_undefined_options('build', ('build_base', 'built_docs'))
-
-    def run(self):
-        # metadata contains information supplied in setup()
-        metadata = self.distribution.metadata
-        # package_dir may be None, in that case use the current directory.
-        src_dir = (self.distribution.package_dir or {'': ''})['']
-        src_dir = os.path.join(os.getcwd(), src_dir)
-        import sphinx
-        sphinx.main(['runme',
-                     '-D', 'version=%s' % metadata.get_version(),
-                     os.path.join('docs', ), os.path.join(self.built_docs, 'docs')])
-
-
 # take a potential build-base option into account (for instance, if osc is
 # build and installed like this:
 # python setup.py build --build-base=<dir> ... install ...)
@@ -90,20 +58,34 @@ class install_data(install_data.install_data, object):
         self.data_files = data_files
 
 
-addparams = {}
-if HAVE_PY2EXE:
-    addparams['console'] = [
-        {'script': 'osc-wrapper.py', 'dest_base': 'osc', 'icon_resources': [(1, 'osc.ico')]}]
-    addparams['zipfile'] = 'shared.lib'
-    addparams['options'] = {'py2exe': {'optimize': 0, 'compressed': True,
-                                       'packages': ['xml.etree', 'StringIO', 'gzip']}}
-
 data_files = []
-if sys.platform[:3] != 'win':
-    data_files.append((os.path.join('share', 'man', 'man1'), ['osc.1.gz']))
+data_files.append((os.path.join('share', 'man', 'man1'), ['osc.1.gz']))
 
-with open("README") as fh:
-    long_description = fh.read()
+with open("README.md") as fh:
+    lines = fh.readlines()
+    while lines:
+        line = lines[0].strip()
+        if not line or line.startswith("["):
+            # skip leading empty lines
+            # skip leading lines with links to badges
+            lines.pop(0)
+            continue
+        break
+    long_description = "".join(lines)
+
+cmdclass = {
+    'build': build_osc,
+    'install_data': install_data
+}
+
+# keep build deps minimal and be tolerant to missing sphinx
+# that is not needed during package build
+try:
+    import sphinx.setup_command
+    cmdclass['build_doc'] = sphinx.setup_command.BuildDoc
+except ImportError:
+    pass
+
 
 setuptools.setup(
     name='osc',
@@ -113,15 +95,15 @@ setuptools.setup(
     long_description_content_type="text/plain",
     author='openSUSE project',
     author_email='opensuse-buildservice@opensuse.org',
-    license='GPL',
-    platforms=['Linux', 'Mac OSX', 'Windows XP/2000/NT', 'Windows 95/98/ME', 'FreeBSD'],
+    license='GPLv2+',
+    platforms=['Linux', 'MacOS X', 'FreeBSD'],
     keywords=['openSUSE', 'SUSE', 'RPM', 'build', 'buildservice'],
     url='http://en.opensuse.org/openSUSE:OSC',
     download_url='https://github.com/openSUSE/osc',
     packages=['osc', 'osc.util'],
     scripts=['osc-wrapper.py'],
     data_files=data_files,
-    install_requires=['M2Crypto', 'chardet'],
+    install_requires=['M2Crypto'],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Environment :: Console",
@@ -129,7 +111,9 @@ setuptools.setup(
         "Intended Audience :: Information Technology",
         "Intended Audience :: System Administrators",
         "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
-        "Operating System :: OS Independent",
+        "Operating System :: MacOS :: MacOS X",
+        "Operating System :: POSIX :: BSD :: FreeBSD",
+        "Operating System :: POSIX :: Linux",
         "Programming Language :: Python",
         "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3",
@@ -138,16 +122,11 @@ setuptools.setup(
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
         "Topic :: Software Development :: Build Tools",
         "Topic :: System :: Archiving :: Packaging",
     ],
-
-
     # Override certain command classes with our own ones
-    cmdclass={
-        'build': build_osc,
-        'build_docs': build_docs,
-        'install_data': install_data
-    },
-    **addparams
+    cmdclass=cmdclass,
 )

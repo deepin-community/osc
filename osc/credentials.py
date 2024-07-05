@@ -1,19 +1,67 @@
+from __future__ import print_function
+
 import importlib
 import bz2
 import base64
 import getpass
+import sys
+
 try:
     from urllib.parse import urlsplit
 except ImportError:
     from urlparse import urlsplit
+
 try:
     import keyring
 except ImportError:
     keyring = None
+except BaseException as e:
+    # catch and report any exceptions raised in the 'keyring' module
+    msg = "Warning: Unable to load the 'keyring' module due to an internal error:"
+    print(msg, e, file=sys.stderr)
+    keyring = None
+
 try:
     import gnomekeyring
 except ImportError:
     gnomekeyring = None
+except BaseException as e:
+    # catch and report any exceptions raised in the 'gnomekeyring' module
+    msg = "Warning: Unable to load the 'gnomekeyring' module due to an internal error:"
+    print(msg, e, file=sys.stderr)
+    gnomekeyring = None
+
+from . import oscerr
+
+
+class _LazyPassword(object):
+    def __init__(self, pwfunc):
+        self._pwfunc = pwfunc
+        self._password = None
+
+    def __str__(self):
+        if self._password is None:
+            password = self._pwfunc()
+            if callable(password):
+                print('Warning: use of a deprecated credentials manager API.',
+                      file=sys.stderr)
+                password = password()
+            if password is None:
+                raise oscerr.OscIOError(None, 'Unable to retrieve password')
+            self._password = password
+        return self._password
+
+    def __len__(self):
+        return len(str(self))
+
+    def __add__(self, other):
+        return str(self) + other
+
+    def __radd__(self, other):
+        return other + str(self)
+
+    def __getattr__(self, name):
+        return getattr(str(self), name)
 
 
 class AbstractCredentialsManagerDescriptor(object):
@@ -23,11 +71,16 @@ class AbstractCredentialsManagerDescriptor(object):
     def description(self):
         raise NotImplementedError()
 
+    def priority(self):
+        # priority determines order in the credentials managers list
+        # higher number means higher priority
+        raise NotImplementedError()
+
     def create(self, cp):
         raise NotImplementedError()
 
     def __lt__(self, other):
-        return self.name() < other.name()
+        return (-self.priority(), self.name()) < (-other.priority(), other.name())
 
 
 class AbstractCredentialsManager(object):
@@ -42,13 +95,14 @@ class AbstractCredentialsManager(object):
     def create(cls, cp, options):
         return cls(cp, options)
 
-    def get_password(self, url, user, defer=True):
-        # If defer is True a callable can be returned
-        # and the password is retrieved if the callable
-        # is called. Implementations are free to ignore
-        # defer parameter and can directly return the password.
-        # If defer is False the password is directly returned.
+    def _get_password(self, url, user):
         raise NotImplementedError()
+
+    def get_password(self, url, user, defer=True):
+        if defer:
+            return _LazyPassword(lambda: self._get_password(url, user))
+        else:
+            return self._get_password(url, user)
 
     def set_password(self, url, user, password):
         raise NotImplementedError()
@@ -81,10 +135,13 @@ class PlaintextConfigFileCredentialsManager(AbstractCredentialsManager):
 
 class PlaintextConfigFileDescriptor(AbstractCredentialsManagerDescriptor):
     def name(self):
-        return 'Config file credentials manager'
+        return 'Config'
 
     def description(self):
-        return 'Store the credentials in the config file (plain text)'
+        return 'Store the password in plain text in the osc config file [insecure, persistent]'
+
+    def priority(self):
+        return 1
 
     def create(self, cp):
         return PlaintextConfigFileCredentialsManager(cp, None)
@@ -110,16 +167,22 @@ class ObfuscatedConfigFileCredentialsManager(
 
     @classmethod
     def decode_password(cls, password):
+        if password is None:
+            # avoid crash on encoding None when 'pass' is not specified in the config
+            return None
         compressed_pw = base64.b64decode(password.encode("ascii"))
         return bz2.decompress(compressed_pw).decode("ascii")
 
 
 class ObfuscatedConfigFileDescriptor(AbstractCredentialsManagerDescriptor):
     def name(self):
-        return 'Obfuscated Config file credentials manager'
+        return 'Obfuscated config'
 
     def description(self):
-        return 'Store the credentials in the config file (obfuscated)'
+        return 'Store the password in obfuscated form in the osc config file [insecure, persistent]'
+
+    def priority(self):
+        return 2
 
     def create(self, cp):
         return ObfuscatedConfigFileCredentialsManager(cp, None)
@@ -134,10 +197,10 @@ class TransientCredentialsManager(AbstractCredentialsManager):
         if options is not None:
             raise RuntimeError('options must be None')
 
-    def get_password(self, url, user, defer=True):
-        if defer:
-            return self
-        return self()
+    def _get_password(self, url, user):
+        if self._password is None:
+            self._password = getpass.getpass('Password: ')
+        return self._password
 
     def set_password(self, url, user, password):
         self._password = password
@@ -146,18 +209,16 @@ class TransientCredentialsManager(AbstractCredentialsManager):
     def delete_password(self, url, user):
         self._password = None
 
-    def __call__(self):
-        if self._password is None:
-            self._password = getpass.getpass('Password: ')
-        return self._password
-
 
 class TransientDescriptor(AbstractCredentialsManagerDescriptor):
     def name(self):
-        return 'Transient password store'
+        return 'Transient'
 
     def description(self):
-        return 'Do not store the password and always ask for the password'
+        return 'Do not store the password and always ask for it [secure, in-memory]'
+
+    def priority(self):
+        return 3
 
     def create(self, cp):
         return TransientCredentialsManager(cp, None)
@@ -170,7 +231,12 @@ class KeyringCredentialsManager(AbstractCredentialsManager):
         self._backend_cls_name = options
 
     def _load_backend(self):
-        keyring_backend = keyring.core.load_keyring(self._backend_cls_name)
+        try:
+            keyring_backend = keyring.core.load_keyring(self._backend_cls_name)
+        except ModuleNotFoundError:
+            msg = "Invalid credentials_mgr_class: {}".format(self._backend_cls_name)
+            from . import conf
+            raise oscerr.ConfigError(msg, conf.config['conffile'])
         keyring.set_keyring(keyring_backend)
 
     @classmethod
@@ -179,7 +245,7 @@ class KeyringCredentialsManager(AbstractCredentialsManager):
             return None
         return super(cls, cls).create(cp, options)
 
-    def get_password(self, url, user, defer=True):
+    def _get_password(self, url, user):
         self._load_backend()
         return keyring.get_password(urlsplit(url)[1], user)
 
@@ -195,17 +261,28 @@ class KeyringCredentialsManager(AbstractCredentialsManager):
 
 
 class KeyringCredentialsDescriptor(AbstractCredentialsManagerDescriptor):
-    def __init__(self, keyring_backend):
+    def __init__(self, keyring_backend, name=None, description=None, priority=None):
         self._keyring_backend = keyring_backend
+        self._name = name
+        self._description = description
+        self._priority = priority
 
     def name(self):
+        if self._name:
+            return self._name
         if hasattr(self._keyring_backend, 'name'):
             return self._keyring_backend.name
-        else:
-            return self._keyring_backend.__class__.__name__
+        return self._keyring_backend.__class__.__name__
 
     def description(self):
+        if self._description:
+            return self._description
         return 'Backend provided by python-keyring'
+
+    def priority(self):
+        if self._priority is not None:
+            return self._priority
+        return 0
 
     def create(self, cp):
         qualified_backend_name = qualified_name(self._keyring_backend)
@@ -219,7 +296,7 @@ class GnomeKeyringCredentialsManager(AbstractCredentialsManager):
             return None
         return super(cls, cls).create(cp, options)
 
-    def get_password(self, url, user, defer=True):
+    def _get_password(self, url, user):
         gk_data = self._keyring_data(url, user)
         if gk_data is None:
             return None
@@ -276,24 +353,55 @@ class GnomeKeyringCredentialsDescriptor(AbstractCredentialsManagerDescriptor):
         return 'Deprecated GNOME Keyring Manager. If you use \
                 this we will send you a Dial-In modem'
 
+    def priority(self):
+        return 0
+
     def create(self, cp):
         return GnomeKeyringCredentialsManager(cp, None)
 
 
+# we're supporting only selected python-keyring backends in osc
+SUPPORTED_KEYRING_BACKENDS = {
+    "keyutils.osc.OscKernelKeyringBackend": {
+        "name": "Kernel keyring",
+        "description": "Store password in user session keyring in kernel keyring [secure, in-memory, per-session]",
+        "priority": 10,
+    },
+    "keyring.backends.SecretService.Keyring": {
+        "name": "Secret Service",
+        "description": "Store password in Secret Service (GNOME Keyring backend) [secure, persistent]",
+        "priority": 9,
+    },
+    "keyring.backends.kwallet.DBusKeyring": {
+        "name": "KWallet",
+        "description": "Store password in KWallet [secure, persistent]",
+        "priority": 8,
+    },
+}
+
+
 def get_credentials_manager_descriptors():
-    if has_keyring_support():
-        backend_list = keyring.backend.get_all_keyring()
-    else:
-        backend_list = []
     descriptors = []
-    for backend in backend_list:
-        descriptors.append(KeyringCredentialsDescriptor(backend))
-    descriptors.sort()
+
+    if has_keyring_support():
+        for backend in keyring.backend.get_all_keyring():
+            qualified_backend_name = qualified_name(backend)
+            data = SUPPORTED_KEYRING_BACKENDS.get(qualified_backend_name, None)
+            if not data:
+                continue
+            descriptor = KeyringCredentialsDescriptor(
+                backend,
+                data["name"],
+                data["description"],
+                data["priority"]
+            )
+            descriptors.append(descriptor)
     if gnomekeyring:
         descriptors.append(GnomeKeyringCredentialsDescriptor())
     descriptors.append(PlaintextConfigFileDescriptor())
     descriptors.append(ObfuscatedConfigFileDescriptor())
     descriptors.append(TransientDescriptor())
+    descriptors.sort()
     return descriptors
 
 
@@ -310,7 +418,13 @@ def create_credentials_manager(url, cp):
         creds_mgr_cls = config_entry
         options = None
     mod, cls = creds_mgr_cls.rsplit('.', 1)
-    return getattr(importlib.import_module(mod), cls).create(cp, options)
+    try:
+        creds_mgr = getattr(importlib.import_module(mod), cls).create(cp, options)
+    except ModuleNotFoundError:
+        msg = "Invalid credentials_mgr_class: {}".format(creds_mgr_cls)
+        from . import conf
+        raise oscerr.ConfigError(msg, conf.config['conffile'])
+    return creds_mgr
 
 
 def qualified_name(obj):

@@ -1,4 +1,4 @@
 #!/usr/bin/dh-exec
 dist/osc.complete => /usr/lib/osc/complete
 dist/complete.csh => /etc/profile.d/osc.csh
-osc.fish /usr/share/fish/completions
+osc.fish /usr/share/fish/vendor_completions.d

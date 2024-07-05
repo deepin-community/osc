@@ -9,11 +9,11 @@ import sys, os
 
 try:
     from urllib.parse import quote_plus
-    from urllib.request import HTTPBasicAuthHandler, HTTPCookieProcessor, HTTPPasswordMgrWithDefaultRealm, HTTPError
+    from urllib.request import HTTPError
 except ImportError:
     #python 2.x
     from urllib import quote_plus
-    from urllib2 import HTTPBasicAuthHandler, HTTPCookieProcessor, HTTPPasswordMgrWithDefaultRealm, HTTPError
+    from urllib2 import HTTPError
 
 from .core import makeurl, streamfile, dgst
 from .grabber import OscFileGrabber, OscMirrorGroup
@@ -29,27 +29,22 @@ from .meter import create_text_meter
 class Fetcher:
     def __init__(self, cachedir='/tmp', api_host_options={}, urllist=[],
                  http_debug=False, cookiejar=None, offline=False,
-                 enable_cpio=True, modules=[]):
+                 enable_cpio=True, modules=[], download_api_only=False):
         # set up progress bar callback
         self.progress_obj = None
         if sys.stdout.isatty():
             self.progress_obj = create_text_meter(use_pb_fallback=False)
 
         self.cachedir = cachedir
+        # generic download URL lists
         self.urllist = urllist
         self.modules = modules
         self.http_debug = http_debug
         self.offline = offline
         self.cpio = {}
         self.enable_cpio = enable_cpio
+        self.download_api_only = download_api_only
 
-        passmgr = HTTPPasswordMgrWithDefaultRealm()
-        for host in api_host_options:
-            passmgr.add_password(None, host, api_host_options[host]['user'],
-                                 api_host_options[host]['pass'])
-        openers = (HTTPBasicAuthHandler(passmgr), )
-        if cookiejar:
-            openers += (HTTPCookieProcessor(cookiejar), )
         self.gr = OscFileGrabber(progress_obj=self.progress_obj)
 
     def __add_cpio(self, pac):
@@ -97,8 +92,8 @@ class Fetcher:
                     try:
                         fd, tmpfile = tempfile.mkstemp(prefix='osc_build_file')
                         archive.copyin_file(hdr.filename,
-                                            os.path.dirname(tmpfile),
-                                            os.path.basename(tmpfile))
+                                            decode_it(os.path.dirname(tmpfile)),
+                                            decode_it(os.path.basename(tmpfile)))
                         self.move_package(tmpfile, pac.localdir, pac)
                     finally:
                         os.close(fd)
@@ -200,22 +195,34 @@ class Fetcher:
                 print(e, file=sys.stderr)
                 sys.exit(1)
 
+    def _build_urllist(self, buildinfo, pac):
+        if self.download_api_only:
+            return []
+        urllist = self.urllist
+        key = '%s/%s' % (pac.project, pac.repository)
+        project_repo_url = buildinfo.urls.get(key)
+        if project_repo_url is not None:
+            urllist = [project_repo_url]
+        return urllist
+
     def run(self, buildinfo):
         cached = 0
         all = len(buildinfo.deps)
         for i in buildinfo.deps:
-            i.makeurls(self.cachedir, self.urllist)
+            urllist = self._build_urllist(buildinfo, i)
+            i.makeurls(self.cachedir, urllist)
             # find container extension by looking in the cache
             if i.name.startswith('container:') and i.fullfilename.endswith('.tar.xz'):
                 for ext in ['.tar.xz', '.tar.gz', '.tar']:
                     if os.path.exists(i.fullfilename[:-7] + ext):
                         i.canonname = i.canonname[:-7] + ext
-                        i.makeurls(self.cachedir, self.urllist)
+                        i.makeurls(self.cachedir, urllist)
 
             if os.path.exists(i.fullfilename):
                 cached += 1
+                if not i.name.startswith('container:') and i.pacsuffix != 'rpm':
+                    continue
                 if i.hdrmd5:
-                    from .util import packagequery
                     if i.name.startswith('container:'):
                         hdrmd5 = dgst(i.fullfilename)
                     else:
@@ -223,6 +230,7 @@ class Fetcher:
                     if not hdrmd5 or hdrmd5 != i.hdrmd5:
                         os.unlink(i.fullfilename)
                         cached -= 1
+
         miss = 0
         needed = all - cached
         if all:
@@ -230,7 +238,6 @@ class Fetcher:
         print("%.1f%% cache miss. %d/%d dependencies cached.\n" % (miss, cached, all))
         done = 1
         for i in buildinfo.deps:
-            i.makeurls(self.cachedir, self.urllist)
             if not os.path.exists(i.fullfilename):
                 if self.offline:
                     raise oscerr.OscIOError(None,
@@ -238,10 +245,6 @@ class Fetcher:
                                             '--offline not possible.' %
                                             i.fullfilename)
                 self.dirSetup(i)
-                if i.hdrmd5 and self.enable_cpio:
-                    self.__add_cpio(i)
-                    done += 1
-                    continue
                 try:
                     # if there isn't a progress bar, there is no output at all
                     prefix = ''
@@ -250,6 +253,20 @@ class Fetcher:
                     else:
                         prefix = '[%d/%d] ' % (done, needed)
                     self.fetch(i, prefix=prefix)
+
+                    if not os.path.isfile(i.fullfilename):
+                        # if the file wasn't downloaded and cannot be found on disk,
+                        # mark it for downloading from the API
+                        self.__add_cpio(i)
+                    else:
+                        # if the checksum of the downloaded package doesn't match,
+                        # delete it and mark it for downloading from the API
+                        hdrmd5 = packagequery.PackageQuery.queryhdrmd5(i.fullfilename)
+                        if not hdrmd5 or hdrmd5 != i.hdrmd5:
+                            print('%s/%s: attempting download from api, since the hdrmd5 did not match - %s != %s'
+                                % (i.project, i.name, hdrmd5, i.hdrmd5))
+                            os.unlink(i.fullfilename)
+                            self.__add_cpio(i)
 
                 except KeyboardInterrupt:
                     print('Cancelled by user (ctrl-c)')

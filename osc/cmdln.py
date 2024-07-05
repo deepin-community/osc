@@ -326,6 +326,8 @@ class RawCmdln(cmd.Cmd):
         if self.optparser: # i.e. optparser=None means don't process for opts
             try:
                 self.options, args = self.optparser.parse_args(argv[1:])
+                # store args so we can use them in self.postoptparse()
+                self.args = args
             except CmdlnUserError as ex:
                 msg = "%s: %s\nTry '%s help' for info.\n"\
                       % (self.name, ex, self.name)
@@ -791,10 +793,10 @@ class RawCmdln(cmd.Cmd):
             # practice dictates that command help strings begin with this, but
             # it isn't at all wanted for the command list.
             to_strip = "${cmd_name}:"
-            if doc and doc.startswith(to_strip):
+            if doc and doc.lstrip().startswith(to_strip):
                 #log.debug("stripping %r from start of %s's help string",
                 #          to_strip, cmdname)
-                doc = doc[len(to_strip):].lstrip()
+                doc = (doc.lstrip())[len(to_strip):].lstrip()
             if not getattr(self._get_cmd_handler(cmdname), "hidden", None):
                 linedata.append( (cmdstr, doc) )
 

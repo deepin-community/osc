@@ -38,12 +38,14 @@ The configuration dictionary could look like this:
 
 import bz2
 import base64
+import errno
 import os
 import re
 import sys
 import ssl
-import warnings
 import getpass
+import time
+import subprocess
 
 try:
     from http.cookiejar import LWPCookieJar, CookieJar
@@ -53,18 +55,20 @@ try:
     from urllib.error import URLError
     from urllib.request import HTTPBasicAuthHandler, HTTPCookieProcessor, HTTPPasswordMgrWithDefaultRealm, ProxyHandler
     from urllib.request import AbstractHTTPHandler, build_opener, proxy_bypass, HTTPSHandler
+    from urllib.request import BaseHandler, parse_keqv_list, parse_http_list
 except ImportError:
     #python 2.x
     from cookielib import LWPCookieJar, CookieJar
     from httplib import HTTPConnection, HTTPResponse
     from StringIO import StringIO
     from urlparse import urlsplit
-    from urllib2 import URLError, HTTPBasicAuthHandler, HTTPCookieProcessor, HTTPPasswordMgrWithDefaultRealm, ProxyHandler, AbstractBasicAuthHandler
+    from urllib2 import URLError, HTTPBasicAuthHandler, HTTPCookieProcessor, HTTPPasswordMgrWithDefaultRealm, ProxyHandler
     from urllib2 import AbstractHTTPHandler, build_opener, proxy_bypass, HTTPSHandler
+    from urllib2 import BaseHandler, parse_keqv_list, parse_http_list
 
 from . import OscConfigParser
 from osc import oscerr
-from osc.util.helper import raw_input
+from osc.util.helper import raw_input, decode_it
 from .oscsslexcp import NoSecureSSLError
 from osc import credentials
 
@@ -87,17 +91,31 @@ except:
 def _get_processors():
     """
     get number of processors (online) based on
-    SC_NPROCESSORS_ONLN (returns 1 if config name does not exist).
+    SC_NPROCESSORS_ONLN (returns 1 if config name/os.sysconf does not exist).
     """
     try:
         return os.sysconf('SC_NPROCESSORS_ONLN')
-    except ValueError as e:
+    except (AttributeError, ValueError):
         return 1
+
+
+def _identify_osccookiejar():
+    if os.path.isfile(os.path.join(os.path.expanduser("~"), '.osc_cookiejar')):
+        # For backwards compatibility, use the old location if it exists
+        return '~/.osc_cookiejar'
+
+    if os.getenv('XDG_STATE_HOME', '') != '':
+        osc_state_dir = os.path.join(os.getenv('XDG_STATE_HOME'), 'osc')
+    else:
+        osc_state_dir = os.path.join(os.path.expanduser("~"), '.local', 'state', 'osc')
+
+    return os.path.join(osc_state_dir, 'cookiejar')
 
 DEFAULTS = {'apiurl': 'https://api.opensuse.org',
             'user': None,
             'pass': None,
             'passx': None,
+            'sshkey': None,
             'packagecachedir': '/var/tmp/osbuild-packagecache',
             'su-wrapper': 'sudo',
 
@@ -108,6 +126,7 @@ DEFAULTS = {'apiurl': 'https://api.opensuse.org',
             'build-uid': '',                    # use the default provided by build
             'build-device': '',                 # required for VM builds
             'build-memory': '',                 # required for VM builds
+            'build-shell-after-fail': '0',      # optional for VM builds
             'build-swap': '',                   # optional for VM builds
             'build-vmdisk-rootsize': '',        # optional for VM builds
             'build-vmdisk-swapsize': '',        # optional for VM builds
@@ -115,11 +134,14 @@ DEFAULTS = {'apiurl': 'https://api.opensuse.org',
             'build-vm-user': '',                # optional for VM builds
             'build-kernel': '',                 # optional for VM builds
             'build-initrd': '',                 # optional for VM builds
+            'download-assets-cmd': '/usr/lib/build/download_assets', # optional for scm/git based builds
 
             'build-jobs': str(_get_processors()),
             'builtin_signature_check': '1',     # by default use builtin check for verify pkgs
             'icecream': '0',
             'ccache': '0',
+            'sccache': '0',
+            'sccache_uri': '',
 
             'buildlog_strip_time': '0',  # strips the build time from the build log
 
@@ -133,7 +155,7 @@ DEFAULTS = {'apiurl': 'https://api.opensuse.org',
             'post_mortem': '0',
             'use_keyring': '0',
             'gnome_keyring': '0',
-            'cookiejar': '~/.osc_cookiejar',
+            'cookiejar': _identify_osccookiejar(),
             # fallback for osc build option --no-verify
             'no_verify': '0',
             # enable project tracking by default
@@ -201,10 +223,11 @@ boolean_opts = ['debug', 'do_package_tracking', 'http_debug', 'post_mortem', 'tr
     'checkout_no_colon', 'checkout_rooted', 'check_for_request_on_action', 'linkcontrol', 'show_download_progress', 'request_show_interactive',
     'request_show_source_buildstatus', 'review_inherit_group', 'use_keyring', 'gnome_keyring', 'no_verify', 'builtin_signature_check',
     'http_full_debug', 'include_request_from_project', 'local_service_run', 'buildlog_strip_time', 'no_preinstallimage',
-    'status_mtime_heuristic', 'print_web_links', 'ccache']
+    'status_mtime_heuristic', 'print_web_links', 'ccache', 'sccache', 'build-shell-after-fail']
 integer_opts = ['build-jobs']
 
-api_host_options = ['user', 'pass', 'passx', 'aliases', 'http_headers', 'realname', 'email', 'sslcertck', 'cafile', 'capath', 'trusted_prj']
+api_host_options = ['user', 'pass', 'passx', 'aliases', 'http_headers', 'realname', 'email', 'sslcertck', 'cafile', 'capath', 'trusted_prj',
+    'downloadurl', 'sshkey']
 
 new_conf_template = """
 [general]
@@ -218,6 +241,8 @@ apiurl = %(apiurl)s
 
 # Wrapper to call build as root (sudo, su -, ...)
 #su-wrapper = %(su-wrapper)s
+# set it empty to run build script as user (works only with KVM atm):
+#su-wrapper =
 
 # rootdir to setup the chroot environment
 # can contain %%(repo)s, %%(arch)s, %%(project)s, %%(package)s and %%(apihost)s (apihost is the hostname
@@ -237,6 +262,9 @@ apiurl = %(apiurl)s
 #     qemu -  qemu VM build
 #     lxc  -  lxc build
 #build-type =
+
+# Execute always a shell prompt on build failure inside of the build environment
+#build-shell-after-fail = 1
 
 # build-device is the disk-image file to use as root for VM builds
 # e.g. /var/tmp/FILE.root
@@ -281,14 +309,25 @@ apiurl = %(apiurl)s
 # Enable ccache in build roots.
 # ccache = 1
 
+# Enable sccache in build roots. Conflicts with ccache.
+# Equivalent to sccache_uri = file:///var/tmp/osbuild-sccache-{pkgname}.tar
+# sccache = 1
+
+# Optional URI for sccache storage. Maybe a file://, redis:// or other URI supported
+# by the configured sccache install. This uri MAY take {pkgname} as a special parameter
+# which will be replaced with the name of the package to be built.
+# sccache_uri = file:///var/tmp/osbuild-sccache-{pkgname}.tar.lzop
+# sccache_uri = file:///var/tmp/osbuild-sccache-{pkgname}.tar
+# sccache_uri = redis://127.0.0.1:6379
+
 # extra packages to install when building packages locally (osc build)
 # this corresponds to osc build's -x option and can be overridden with that
 # -x '' can also be given on the command line to override this setting, or
-# you can have an empty setting here. This global setting may leads to 
+# you can have an empty setting here. This global setting may leads to
 # dependency problems when the base distro is not providing the package.
 # => using server side definition via cli_debug_packages substitute rule is
 #    recommended therefore.
-#extra-pkgs = 
+#extra-pkgs =
 
 # build platform is used if the platform argument is omitted to osc build
 #build_repository = %(build_repository)s
@@ -409,7 +448,7 @@ def urljoin(scheme, apisrv, path=''):
 
 
 def is_known_apiurl(url):
-    """returns true if url is a known apiurl"""
+    """returns ``True`` if url is a known apiurl"""
     apiurl = urljoin(*parse_apisrv_url(None, url))
     return apiurl in config['api_host_options']
 
@@ -431,8 +470,8 @@ def extract_known_apiurl(url):
 
 def get_apiurl_api_host_options(apiurl):
     """
-    Returns all apihost specific options for the given apiurl, None if
-    no such specific optiosn exist.
+    Returns all apihost specific options for the given apiurl, ``None`` if
+    no such specific options exist.
     """
     # FIXME: in A Better World (tm) there was a config object which
     # knows this instead of having to extract it from a url where it
@@ -472,6 +511,219 @@ def get_apiurl_usr(apiurl):
 def _build_opener(apiurl):
     from osc.core import __version__
     global config
+
+    class OscHTTPAuthHandler(HTTPBasicAuthHandler, object):
+        # python2: inherit from object in order to make it a new-style class
+        # (HTTPBasicAuthHandler is not a new-style class)
+
+        def __init__(self, password_mgr=None, signatureauthhandler=None):
+            super(self.__class__, self).__init__(password_mgr)
+            self.signatureauthhandler = signatureauthhandler
+
+        def add_parent(self, parent):
+            super(self.__class__, self).add_parent(parent)
+            if self.signatureauthhandler:
+                self.signatureauthhandler.add_parent(parent)
+
+        def _rewind_request(self, req):
+            if hasattr(req.data, 'seek'):
+                # if the request is issued again (this time with an
+                # Authorization header), the file's offset has to be
+                # repositioned to the beginning of the file (otherwise,
+                # a 0-length body is sent which most likely does not match
+                # the Content-Length header (if present))
+                req.data.seek(0)
+
+        def http_error_401(self, req, fp, code, msg, headers):
+            self._rewind_request(req)
+            authreqs = {}
+            if hasattr(headers, "get_all"):
+                all_headers = headers.get_all('www-authenticate', [])
+            else:
+                all_headers = []
+                header_name = 'www-authenticate'
+                for header in headers.getallmatchingheaders(header_name):
+                    header = header[len(header_name) + 1:].lstrip()
+                    all_headers.append(header)
+
+            for authreq in all_headers:
+                scheme = authreq.split()[0].lower()
+                authreqs[scheme] = authreq
+
+            if 'signature' in authreqs \
+                and self.signatureauthhandler \
+                and (
+                    # sshkey explicitly set in the config file, use it instead of doing basic auth
+                    self.signatureauthhandler.sshkey_known()
+                    or (
+                        # can't fall-back to basic auth, because server doesn't support it
+                        'basic' not in authreqs
+                        # can't fall-back to basic auth, because there's no password provided
+                        or not self.passwd.find_user_password(None, apiurl)[1]
+                    )):
+                del headers['www-authenticate']
+                headers['www-authenticate'] = authreqs['signature']
+                return self.signatureauthhandler.http_error_401(req, fp, code, msg, headers)
+
+            if 'basic' in authreqs:
+                del headers['www-authenticate']
+                headers['www-authenticate'] = authreqs['basic']
+
+            response = super(self.__class__, self).http_error_401(req, fp, code, msg, headers)
+            # workaround for http://bugs.python.org/issue9639
+            if hasattr(self, 'retried'):
+                self.retried = 0
+            return response
+
+    class OscHTTPSignatureAuthHandler(BaseHandler, object):
+        def __init__(self, user, sshkey):
+            super(self.__class__, self).__init__()
+            self.user = user
+            self.sshkey = sshkey
+
+        def list_ssh_agent_keys(self):
+            cmd = ['ssh-add', '-l']
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, _ = proc.communicate()
+            if proc.returncode == 0 and stdout.strip():
+                return [self.get_fingerprint(line) for line in stdout.splitlines()]
+            else:
+                return []
+
+        def is_ssh_private_keyfile(self, keyfile_path):
+            if not os.path.isfile(keyfile_path):
+                return False
+            with open(keyfile_path, "r") as f:
+                try:
+                   line = f.readline(100).strip()
+                except UnicodeDecodeError:
+                   # skip binary files
+                   return False
+                if line == "-----BEGIN RSA PRIVATE KEY-----":
+                    return True
+                if line == "-----BEGIN OPENSSH PRIVATE KEY-----":
+                    return True
+            return False
+
+        def is_ssh_public_keyfile(self, keyfile_path):
+            if not os.path.isfile(keyfile_path):
+                return False
+            return keyfile_path.endswith(".pub")
+
+        @staticmethod
+        def get_fingerprint(line):
+            parts = line.strip().split(b" ")
+            if len(parts) < 2:
+                raise ValueError("Unable to retrieve ssh key fingerprint from line: {}".format(line))
+            return parts[1]
+
+        def list_ssh_dir_keys(self):
+            keys_in_home_ssh = {}
+
+            sshdir = os.path.expanduser('~/.ssh')
+            if not os.path.isdir(sshdir):
+                return keys_in_home_ssh
+
+            for keyfile in os.listdir(sshdir):
+                if keyfile.startswith(("agent-", "authorized_keys", "config", "known_hosts")):
+                    # skip files that definitely don't contain keys
+                    continue
+
+                keyfile_path = os.path.join(sshdir, keyfile)
+                # public key alone may be sufficient because the private key
+                # can get loaded into ssh-agent from gpg (yubikey works this way)
+                is_public = self.is_ssh_public_keyfile(keyfile_path)
+                # skip private detection if we think the key is a public one already
+                is_private = False if is_public else self.is_ssh_private_keyfile(keyfile_path)
+
+                if not is_public and not is_private:
+                    continue
+
+                cmd = ["ssh-keygen", "-lf", keyfile_path]
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                stdout, _ = proc.communicate()
+                if proc.returncode == 0:
+                    fingerprint = self.get_fingerprint(stdout)
+                    if fingerprint and (fingerprint not in keys_in_home_ssh or is_private):
+                        # prefer path to a private key
+                        keys_in_home_ssh[fingerprint] = keyfile_path
+            return keys_in_home_ssh
+
+        def guess_keyfile(self):
+            keys_in_agent = self.list_ssh_agent_keys()
+            if keys_in_agent:
+                keys_in_home_ssh = self.list_ssh_dir_keys()
+                for fingerprint in keys_in_agent:
+                    if fingerprint in keys_in_home_ssh:
+                        return keys_in_home_ssh[fingerprint]
+            sshdir = os.path.expanduser('~/.ssh')
+            keyfiles = ('id_ed25519', 'id_ed25519_sk', 'id_rsa', 'id_ecdsa', 'id_ecdsa_sk', 'id_dsa')
+            for keyfile in keyfiles:
+                keyfile_path = os.path.join(sshdir, keyfile)
+                if os.path.isfile(keyfile_path):
+                    return keyfile_path
+            raise oscerr.OscIOError(None, 'could not guess ssh identity keyfile')
+
+        def ssh_sign(self, data, namespace, keyfile=None):
+            try:
+                data = bytes(data, 'utf-8')
+            except:
+                pass
+            if not keyfile:
+                keyfile = self.guess_keyfile()
+            else:
+                if '/' not in keyfile:
+                    keyfile = '~/.ssh/' + keyfile
+                keyfile = os.path.expanduser(keyfile)
+
+            cmd = ['ssh-keygen', '-Y', 'sign', '-f', keyfile, '-n', namespace, '-q']
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            stdout, _ = proc.communicate(data)
+            if proc.returncode:
+                raise oscerr.OscIOError(None, 'ssh-keygen signature creation failed: %d' % proc.returncode)
+
+            signature = decode_it(stdout)
+            match = re.match(r"\A-----BEGIN SSH SIGNATURE-----\n(.*)\n-----END SSH SIGNATURE-----", signature, re.S)
+            if not match:
+                raise oscerr.OscIOError(None, 'could not extract ssh signature')
+            return base64.b64decode(match.group(1))
+
+        def get_authorization(self, req, chal):
+            realm = chal.get('realm', '')
+            now = int(time.time())
+            sigdata = "(created): %d" % now
+            signature = self.ssh_sign(sigdata, realm, self.sshkey)
+            signature = decode_it(base64.b64encode(signature))
+            return 'keyId="%s",algorithm="ssh",headers="(created)",created=%d,signature="%s"' \
+                % (self.user, now, signature)
+
+        def retry_http_signature_auth(self, req, auth):
+            old_auth_val = req.get_header('Authorization', None)
+            if old_auth_val:
+                old_scheme = old_auth_val.split()[0]
+                if old_scheme.lower() == 'signature':
+                    return None
+            token, challenge = auth.split(' ', 1)
+            chal = parse_keqv_list(filter(None, parse_http_list(challenge)))
+            auth = self.get_authorization(req, chal)
+            if auth:
+                auth_val = 'Signature %s' % auth
+                req.add_unredirected_header('Authorization', auth_val)
+                return self.parent.open(req, timeout=req.timeout)
+
+        def http_error_401(self, req, fp, code, msg, headers):
+            authreq = headers.get('www-authenticate', None)
+            if authreq:
+                scheme = authreq.split()[0]
+                if scheme.lower() == 'signature':
+                    return self.retry_http_signature_auth(req, authreq)
+                raise ValueError("OscHTTPSignatureAuthHandler does not support"
+                                 " the following scheme: '%s'" % scheme)
+
+        def sshkey_known(self):
+            return self.sshkey is not None
+
+
     if 'last_opener' not in _build_opener.__dict__:
         _build_opener.last_opener = (None, None)
     if apiurl == _build_opener.last_opener[0]:
@@ -485,43 +737,11 @@ def _build_opener(apiurl):
         # read proxies from env
         proxyhandler = ProxyHandler()
 
-    # workaround for http://bugs.python.org/issue9639
-    authhandler_class = HTTPBasicAuthHandler
-    if sys.version_info >= (2, 6, 6) and sys.version_info < (2, 7, 9):
-        class OscHTTPBasicAuthHandler(HTTPBasicAuthHandler):
-            # The following two functions were backported from upstream 2.7.
-            def http_error_auth_reqed(self, authreq, host, req, headers):
-                authreq = headers.get(authreq, None)
-
-                if authreq:
-                    mo = AbstractBasicAuthHandler.rx.search(authreq)
-                    if mo:
-                        scheme, quote, realm = mo.groups()
-                        if quote not in ['"', "'"]:
-                            warnings.warn("Basic Auth Realm was unquoted",
-                                          UserWarning, 2)
-                        if scheme.lower() == 'basic':
-                            return self.retry_http_basic_auth(host, req, realm)
-
-            def retry_http_basic_auth(self, host, req, realm):
-                user, pw = self.passwd.find_user_password(realm, host)
-                if pw is not None:
-                    raw = "%s:%s" % (user, pw)
-                    auth = 'Basic %s' % base64.b64encode(raw).strip()
-                    if req.get_header(self.auth_header, None) == auth:
-                        return None
-                    req.add_unredirected_header(self.auth_header, auth)
-                    return self.parent.open(req, timeout=req.timeout)
-                else:
-                    return None
-
-        authhandler_class = OscHTTPBasicAuthHandler
-
     options = config['api_host_options'][apiurl]
+    signatureauthhandler = OscHTTPSignatureAuthHandler(options['user'], options['sshkey'])
     # with None as first argument, it will always use this username/password
     # combination for urls for which arg2 (apisrv) is a super-url
-    authhandler = authhandler_class( \
-        HTTPPasswordMgrWithDefaultRealm())
+    authhandler = OscHTTPAuthHandler(HTTPPasswordMgrWithDefaultRealm(), signatureauthhandler)
     authhandler.add_password(None, apiurl, options['user'], options['pass'])
 
     if options['sslcertck']:
@@ -604,6 +824,8 @@ def init_basicauth(config, config_mtime):
         AbstractHTTPHandler.__init__ = urllib2_debug_init
 
     cookie_file = os.path.expanduser(config['cookiejar'])
+    if not os.path.exists(os.path.dirname(cookie_file)):
+        os.makedirs(os.path.dirname(cookie_file), mode=0o700)
     global cookiejar
     cookiejar = LWPCookieJar(cookie_file)
     try:
@@ -645,8 +867,21 @@ def write_config(fname, cp):
     if os.path.exists(fname) and not os.path.isfile(fname):
         # only write to a regular file
         return
-    if not os.path.exists(os.path.dirname(fname)):
-        os.makedirs(os.path.dirname(fname), mode=0o700)
+
+    # config file is behind a symlink
+    # resolve the symlink and continue writing the config as usual
+    if os.path.islink(fname):
+        fname = os.readlink(fname)
+
+    # create directories to the config file (if they don't exist already)
+    fdir = os.path.dirname(fname)
+    if fdir:
+        try:
+            os.makedirs(fdir, mode=0o700)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+
     with open(fname + '.new', 'w') as f:
         cp.write(f, comments=True)
     try:
@@ -662,9 +897,9 @@ def config_set_option(section, opt, val=None, delete=False, update=True, creds_m
     """
     Sets a config option. If val is not specified the current/default value is
     returned. If val is specified, opt is set to val and the new value is returned.
-    If an option was modified get_config is called with **kwargs unless update is set
-    to False (override_conffile defaults to config['conffile']).
-    If val is not specified and delete is True then the option is removed from the
+    If an option was modified get_config is called with ``**kwargs`` unless update is set
+    to ``False`` (``override_conffile`` defaults to ``config['conffile']``).
+    If val is not specified and delete is ``True`` then the option is removed from the
     config/reset to the default value.
     """
     cp = get_configParser(config['conffile'])
@@ -692,6 +927,13 @@ def config_set_option(section, opt, val=None, delete=False, update=True, creds_m
     if section == 'general' and not opt in general_opts or \
        section != 'general' and not opt in api_host_options:
         raise oscerr.ConfigError('unknown config option \'%s\'' % opt, config['conffile'])
+
+    if not val and not delete and opt == 'pass' and creds_mgr_descr is not None:
+        # change password store
+        creds_mgr = _get_credentials_manager(section, cp)
+        user = _extract_user_compat(cp, section, creds_mgr)
+        val = creds_mgr.get_password(section, user, defer=False)
+
     run = False
     if val:
         if opt == 'pass':
@@ -721,7 +963,7 @@ def config_set_option(section, opt, val=None, delete=False, update=True, creds_m
     elif delete and (cp.has_option(section, opt) or opt == 'pass'):
         if opt == 'pass':
             creds_mgr = _get_credentials_manager(section, cp)
-            user = _extract_user_compar(cp, section, creds_mgr)
+            user = _extract_user_compat(cp, section, creds_mgr)
             creds_mgr.delete_password(section, user)
         else:
             cp.remove_option(section, opt)
@@ -810,6 +1052,8 @@ class APIHostOptionsEntry(dict):
     def __getitem__(self, key, *args, **kwargs):
         value = super(self.__class__, self).__getitem__(key, *args, **kwargs)
         if key == 'pass' and callable(value):
+            print('Warning: use of a deprecated credentials manager API.',
+                  file=sys.stderr)
             value = value()
         return value
 
@@ -840,7 +1084,15 @@ def get_config(override_conffile=None,
     # okay, we made sure that oscrc exists
 
     # make sure it is not world readable, it may contain a password.
-    os.chmod(conffile, 0o600)
+    conffile_stat = os.stat(conffile)
+    if conffile_stat.st_mode != 0o600:
+        try:
+            os.chmod(conffile, 0o600)
+        except OSError as e:
+            if e.errno == errno.EROFS:
+                print('Warning: file \'%s\' may have an insecure mode.', conffile)
+            else:
+                raise e
 
     cp = get_configParser(conffile)
 
@@ -897,7 +1149,7 @@ def get_config(override_conffile=None,
         user = _extract_user_compat(cp, url, creds_mgr)
         if user is None:
             raise oscerr.ConfigMissingCredentialsError('No user found in section %s' % url, conffile, url)
-        password = creds_mgr.get_password(url, user)
+        password = creds_mgr.get_password(url, user, defer=True)
         if password is None:
             raise oscerr.ConfigMissingCredentialsError('No password found in section %s' % url, conffile, url)
 
@@ -921,7 +1173,7 @@ def get_config(override_conffile=None,
                  'http_headers': http_headers}
         api_host_options[apiurl] = APIHostOptionsEntry(entry)
 
-        optional = ('realname', 'email', 'sslcertck', 'cafile', 'capath')
+        optional = ('realname', 'email', 'sslcertck', 'cafile', 'capath', 'sshkey')
         for key in optional:
             if cp.has_option(url, key):
                 if key == 'sslcertck':
@@ -941,6 +1193,19 @@ def get_config(override_conffile=None,
             api_host_options[apiurl]['trusted_prj'] = cp.get(url, 'trusted_prj').split(' ')
         else:
             api_host_options[apiurl]['trusted_prj'] = []
+
+        # This option is experimental and may be removed at any time in the future!
+        # This allows overriding the download url for an OBS instance to specify a closer mirror
+        # or proxy system, which can greatly improve download performance, latency and more.
+        # For example, this can use https://github.com/Firstyear/opensuse-proxy-cache in a local
+        # geo to improve performance.
+        if cp.has_option(url, 'downloadurl'):
+            api_host_options[apiurl]['downloadurl'] = cp.get(url, 'downloadurl')
+        else:
+            api_host_options[apiurl]['downloadurl'] = None
+
+        if api_host_options[apiurl]['sshkey'] is None:
+            api_host_options[apiurl]['sshkey'] = config['sshkey']
 
     # add the auth data we collected to the config dict
     config['api_host_options'] = api_host_options
@@ -1002,9 +1267,12 @@ def identify_conf():
     if 'OSC_CONFIG' in os.environ:
         return os.environ.get('OSC_CONFIG')
     if os.path.exists(os.path.expanduser('~/.oscrc')):
-        conffile = '~/.oscrc'
+        return '~/.oscrc'
+
+    if os.environ.get('XDG_CONFIG_HOME', '') != '':
+        conffile = os.environ.get('XDG_CONFIG_HOME') + '/osc/oscrc'
     else:
-        conffile = os.environ.get('XDG_CONFIG_HOME', '~/.config') + '/osc/oscrc'
+        conffile = '~/.config/osc/oscrc'
 
     return conffile
 
@@ -1024,9 +1292,21 @@ def select_credentials_manager_descr():
     if not credentials.has_keyring_support():
         print('To use keyrings please install python%d-keyring.' % sys.version_info.major)
     creds_mgr_descriptors = credentials.get_credentials_manager_descriptors()
+
+    rows = []
     for i, creds_mgr_descr in enumerate(creds_mgr_descriptors, 1):
-        print('%d) %s (%s)' % (i, creds_mgr_descr.name(), creds_mgr_descr.description()))#
-    i = raw_input('Select credentials manager: ')
+        rows += [str(i), creds_mgr_descr.name(), creds_mgr_descr.description()]
+
+    from .core import build_table
+    headline = ('NUM', 'NAME', 'DESCRIPTION')
+    table = build_table(len(headline), rows, headline)
+    print()
+    for row in table:
+        print(row)
+
+    i = raw_input('Select credentials manager [default=1]: ')
+    if not i:
+        i = "1"
     if not i.isdigit():
         sys.exit('Invalid selection')
     i = int(i) - 1
