@@ -1,3 +1,9 @@
+osc (0.169.1-2deepin1) unstable; urgency=medium
+
+  * Replace imp with importlib
+
+ -- Tianyu Chen <sweetyfish@deepin.org>  Fri, 05 Jul 2024 09:59:09 +0200
+
 osc (0.169.1-2) unstable; urgency=medium
 
   * Don’t check compatibility with IPv4-only M2Crypto versions.
