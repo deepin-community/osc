@@ -1,0 +1,14 @@
+Fix conf.write_initial_config() to use read_file() instead of deprecated readfp()
+
+Pick from: https://github.com/openSUSE/osc/pull/1446
+--- a/osc/conf.py
++++ b/osc/conf.py
+@@ -758,7 +758,7 @@
+     config.update(entries)
+     sio = StringIO(conf_template.strip() % config)
+     cp = OscConfigParser.OscConfigParser(DEFAULTS)
+-    cp.readfp(sio)
++    cp.read_file(sio)
+     cp.set(config['apiurl'], 'user', config['user'])
+     if creds_mgr_descriptor:
+         creds_mgr = creds_mgr_descriptor.create(cp)
