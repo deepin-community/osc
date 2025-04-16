@@ -1,3 +1,10 @@
+osc (0.169.1-2deepin2) unstable; urgency=medium
+
+  * Apply upstream fix for python 3.12 deprecated API readfp()
+    https://github.com/openSUSE/osc/pull/1446
+
+ -- Cryolitia <liziyao@uniontech.com>  Wed, 16 Apr 2025 17:36:42 +0800
+
 osc (0.169.1-2deepin1) unstable; urgency=medium
 
   * Replace imp with importlib
