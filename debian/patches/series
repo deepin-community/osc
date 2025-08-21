@@ -1,4 +1,1 @@
-setuptools-60.patch
-python-3.11.patch
-python-3.12.patch
-python-3.12-deprecated-readfp.patch
+Revert-Tell-the-build-script-to-disable-repos-contai.patch

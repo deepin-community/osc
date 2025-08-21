@@ -1,24 +1,25 @@
+import os
+import unittest
+
 import osc.core
 import osc.oscerr
-import os
-from common import OscTestCase
-FIXTURES_DIR = os.path.join(os.getcwd(), 'init_package_fixtures')
+
+from .common import OscTestCase
+
+
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'init_package_fixtures')
+
 
 def suite():
-    import unittest
-    return unittest.makeSuite(TestInitPackage)
+    return unittest.defaultTestLoader.loadTestsFromTestCase(TestInitPackage)
+
 
 class TestInitPackage(OscTestCase):
     def _get_fixtures_dir(self):
-        # workaround for git because it doesn't allow empty dirs
-        if not os.path.exists(os.path.join(FIXTURES_DIR, 'osctest')):
-            os.mkdir(os.path.join(FIXTURES_DIR, 'osctest'))
         return FIXTURES_DIR
 
-    def tearDown(self):
-        if os.path.exists(os.path.join(FIXTURES_DIR, 'osctest')):
-            os.rmdir(os.path.join(FIXTURES_DIR, 'osctest'))
-        OscTestCase.tearDown(self)
+    def setUp(self):
+        super().setUp(copytree=False)
 
     def test_simple(self):
         """initialize a package dir"""
@@ -50,7 +51,7 @@ class TestInitPackage(OscTestCase):
         osc.core.Package.init_package('http://localhost', 'osctest', 'testpkg', pac_dir, meta=True)
         storedir = os.path.join(pac_dir, osc.core.store)
         self.assertFalse(os.path.exists(os.path.join(storedir, '_size_limit')))
-        self._check_list(os.path.join(storedir, '_meta_mode'), '')
+        self._check_list(os.path.join(storedir, '_meta_mode'), '\n')
         self._check_list(os.path.join(storedir, '_project'), 'osctest\n')
         self._check_list(os.path.join(storedir, '_package'), 'testpkg\n')
         self._check_list(os.path.join(storedir, '_files'), '<directory />\n')
@@ -80,9 +81,10 @@ class TestInitPackage(OscTestCase):
         """initialize a package dir (dir is a file)"""
         pac_dir = os.path.join(self.tmpdir, 'testpkg')
         os.mkdir(pac_dir)
-        open(os.path.join(pac_dir, osc.core.store), 'w').write('foo\n')
+        with open(os.path.join(pac_dir, osc.core.store), 'w') as f:
+            f.write('foo\n')
         self.assertRaises(osc.oscerr.OscIOError, osc.core.Package.init_package, 'http://localhost', 'osctest', 'testpkg', pac_dir)
 
+
 if __name__ == '__main__':
-    import unittest
     unittest.main()

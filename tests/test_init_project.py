@@ -1,24 +1,26 @@
+import os
+import unittest
+
+import osc.conf
 import osc.core
 import osc.oscerr
-import os
-from common import GET, OscTestCase
-FIXTURES_DIR = os.path.join(os.getcwd(), 'init_project_fixtures')
+
+from .common import GET, OscTestCase
+
+
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'init_project_fixtures')
+
 
 def suite():
-    import unittest
-    return unittest.makeSuite(TestInitProject)
+    return unittest.defaultTestLoader.loadTestsFromTestCase(TestInitProject)
+
 
 class TestInitProject(OscTestCase):
     def _get_fixtures_dir(self):
-        # workaround for git because it doesn't allow empty dirs
-        if not os.path.exists(os.path.join(FIXTURES_DIR, 'osctest')):
-            os.mkdir(os.path.join(FIXTURES_DIR, 'osctest'))
         return FIXTURES_DIR
 
-    def tearDown(self):
-        if os.path.exists(os.path.join(FIXTURES_DIR, 'osctest')):
-            os.rmdir(os.path.join(FIXTURES_DIR, 'osctest'))
-        OscTestCase.tearDown(self)
+    def setUp(self):
+        super().setUp(copytree=False)
 
     def test_simple(self):
         """initialize a project dir"""
@@ -54,7 +56,6 @@ class TestInitProject(OscTestCase):
         disable wc_check (because we didn't disable the package tracking before the Project class
         was imported therefore REQ_STOREFILES contains '_packages')
         """
-        import osc.conf
         # disable package tracking
         osc.conf.config['do_package_tracking'] = False
         prj_dir = os.path.join(self.tmpdir, 'testprj')
@@ -66,6 +67,6 @@ class TestInitProject(OscTestCase):
         self._check_list(os.path.join(storedir, '_apiurl'), 'http://localhost\n')
         self.assertFalse(os.path.exists(os.path.join(storedir, '_packages')))
 
+
 if __name__ == '__main__':
-    import unittest
     unittest.main()

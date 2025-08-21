@@ -1,18 +1,24 @@
+import os
+import re
+import unittest
+
 import osc.core
 import osc.oscerr
 from osc.util.helper import decode_list
-import os
-import re
-from common import GET, OscTestCase
 
-FIXTURES_DIR = os.path.join(os.getcwd(), 'difffile_fixtures')
+from .common import GET, OscTestCase
+
+
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'difffile_fixtures')
+
 
 def suite():
-    import unittest
-    return unittest.makeSuite(TestDiffFiles)
+    return unittest.defaultTestLoader.loadTestsFromTestCase(TestDiffFiles)
+
 
 class TestDiffFiles(OscTestCase):
     diff_hdr = 'Index: %s\n==================================================================='
+
     def _get_fixtures_dir(self):
         return FIXTURES_DIR
 
@@ -322,9 +328,9 @@ Binary file 'binary' has changed.
         def __canonise_diff(diff):
             # we cannot use re.M because python 2.6's re.sub does
             # not support a flags argument
-            diff = [re.sub('^@@ -(\d+) ', '@@ -\\1,\\1 ', line)
+            diff = [re.sub(r'^@@ -(\d+) ', '@@ -\\1,\\1 ', line)
                     for line in diff.split('\n')]
-            diff = [re.sub('^(@@ -\d+,\d+) \+(\d+) ', '\\1 +\\2,\\2 ', line)
+            diff = [re.sub(r'^(@@ -\d+,\d+) \+(\d+) ', '\\1 +\\2,\\2 ', line)
                     for line in diff]
             return '\n'.join(diff)
 
@@ -332,6 +338,6 @@ Binary file 'binary' has changed.
         exp = __canonise_diff(exp)
         self.assertEqualMultiline(got, exp)
 
+
 if __name__ == '__main__':
-    import unittest
     unittest.main()

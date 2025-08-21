@@ -1,34 +1,39 @@
 Source: osc
 Maintainer: RPM packaging team <team+pkg-rpm@tracker.debian.org>
-Uploaders: Andrej Shadura <andrewsh@debian.org>
+Uploaders: Andrej Shadura <andrewsh@debian.org>,
+           Dylan Aïssi <daissi@debian.org>
 Section: devel
 Priority: optional
 Build-Depends: bash-completion,
                debhelper-compat (= 13),
                dh-exec,
                dh-python,
+               diffstat <!nocheck>,
+               git <!nocheck>,
                python3,
+               python3-argparse-manpage,
+               python3-cryptography,
+               python3-ruamel.yaml,
                python3-setuptools,
-               python3-m2crypto,
-Standards-Version: 4.5.0
+               python3-urllib3
+Standards-Version: 4.7.0
 Vcs-Browser: https://salsa.debian.org/pkg-rpm-team/osc
 Vcs-Git: https://salsa.debian.org/pkg-rpm-team/osc.git
-Homepage: http://en.opensuse.org/openSUSE:OSC
+Homepage: https://en.opensuse.org/openSUSE:OSC
+Rules-Requires-Root: no
 
 Package: osc
 Architecture: all
-Depends: ${shlibs:Depends},
+Depends: ca-certificates,
          ${misc:Depends},
          ${python3:Depends},
-         python3-m2crypto,
-         ca-certificates
-Recommends: python3-rpm,
-            rpm2cpio,
+         ${shlibs:Depends}
+Recommends: bash-completion,
             cpio,
-            sensible-utils,
-            python3-keyring,
             obs-build,
-            bash-completion
+            python3-keyring,
+            rpm2cpio,
+            sensible-utils
 Description: Open Build Service commander
  Commandline client for the Open Build Service, which allows one to access
  repositories in the Open Build Service in similar way as Subversion

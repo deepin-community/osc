@@ -13,19 +13,9 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 
-from __future__ import print_function
 
-import sys
+import configparser
 
-if sys.version_info >= ( 3, ):
-    import configparser
-    ConfigParser = configparser.ConfigParser
-else:
-    #python 2.x
-    import ConfigParser as configparser
-    ConfigParser = configparser.SafeConfigParser
-
-import re
 
 # inspired from http://code.google.com/p/iniparse/ - although their implementation is
 # quite different
@@ -36,6 +26,7 @@ class ConfigLineOrder:
     It keeps track of all lines (including comments) in the _lines list. This list
     either contains SectionLine() instances or CommentLine() instances.
     """
+
     def __init__(self):
         self._lines = []
 
@@ -66,7 +57,7 @@ class ConfigLineOrder:
             self._append(CommentLine(line))
 
     def keys(self):
-        return [ i.name for i in self._lines if i.type == 'section' ]
+        return [i.name for i in self._lines if i.type == 'section']
 
     def __setitem__(self, key, value):
         section = SectionLine(key)
@@ -85,16 +76,19 @@ class ConfigLineOrder:
         self._lines.remove(line)
 
     def __iter__(self):
-        #return self._lines.__iter__()
+        # return self._lines.__iter__()
         for line in self._lines:
             if line.type == 'section':
                 yield line.name
 
+
 class Line:
     """Base class for all line objects"""
+
     def __init__(self, name, type):
         self.name = name
         self.type = type
+
 
 class SectionLine(Line):
     """
@@ -102,10 +96,10 @@ class SectionLine(Line):
     this certain section in the _lines list. The _lines list either contains
     CommentLine() or OptionLine() instances.
     """
-    def __init__(self, sectname, dict = {}):
-        Line.__init__(self, sectname, 'section')
+
+    def __init__(self, sectname):
+        super().__init__(sectname, 'section')
         self._lines = []
-        self._dict = dict
 
     def _find(self, name):
         for line in self._lines:
@@ -113,14 +107,14 @@ class SectionLine(Line):
                 return line
         return None
 
-    def _add_option(self, optname, value = None, line = None, sep = '='):
+    def _add_option(self, optname, value=None, line=None, sep='='):
         if value is None and line is None:
             raise configparser.Error('Either value or line must be passed in')
         elif value and line:
             raise configparser.Error('value and line are mutually exclusive')
 
         if value is not None:
-            line = '%s%s%s' % (optname, sep, value)
+            line = f'{optname}{sep}{value}'
         opt = self._find(optname)
         if opt:
             opt.format(line)
@@ -134,10 +128,10 @@ class SectionLine(Line):
         return dict(self.items())
 
     def items(self):
-        return [ (i.name, i.value) for i in self._lines if i.type == 'option' ]
+        return [(i.name, i.value) for i in self._lines if i.type == 'option']
 
     def keys(self):
-        return [ i.name for i in self._lines ]
+        return [i.name for i in self._lines]
 
     def __setitem__(self, key, val):
         self._add_option(key, val)
@@ -165,19 +159,23 @@ class SectionLine(Line):
 
 class CommentLine(Line):
     """Store a commentline"""
+
     def __init__(self, line):
-        Line.__init__(self, line.strip('\n'), 'comment')
+        super().__init__(line.strip('\n'), 'comment')
 
     def __str__(self):
         return self.name
 
+
 class OptionLine(Line):
     """
-    This class represents an option. The class' "name" attribute is used
+    This class represents an option. The class' ``name`` attribute is used
     to store the option's name and the "value" attribute contains the option's
-    value. The "frmt" attribute preserves the format which was used in the configuration
+    value. The ``frmt`` attribute preserves the format which was used in the configuration
     file.
-    Example:
+
+    Example::
+
         optionx:<SPACE><SPACE>value
         => self.frmt = '%s:<SPACE><SPACE>%s'
         optiony<SPACE>=<SPACE>value<SPACE>;<SPACE>some_comment
@@ -185,12 +183,12 @@ class OptionLine(Line):
     """
 
     def __init__(self, optname, line):
-        Line.__init__(self, optname, 'option')
+        super().__init__(optname, 'option')
         self.name = optname
         self.format(line)
 
     def format(self, line):
-        mo = ConfigParser.OPTCRE.match(line.strip())
+        mo = configparser.ConfigParser.OPTCRE.match(line.strip())
         key, val = mo.group('option', 'value')
         self.frmt = line.replace(key.strip(), '%s', 1)
         pos = val.find(' ;')
@@ -203,7 +201,7 @@ class OptionLine(Line):
         return self.value
 
 
-class OscConfigParser(ConfigParser):
+class OscConfigParser(configparser.ConfigParser):
     """
     OscConfigParser() behaves like a normal ConfigParser() object. The
     only differences is that it preserves the order+format of configuration entries
@@ -211,8 +209,9 @@ class OscConfigParser(ConfigParser):
     In order to keep the order and the format it makes use of the ConfigLineOrder()
     class.
     """
-    def __init__(self, defaults={}):
-        ConfigParser.__init__(self, defaults)
+
+    def __init__(self, defaults=None):
+        super().__init__(defaults or {}, interpolation=None)
         self._sections = ConfigLineOrder()
 
     # XXX: unfortunately we have to override the _read() method from the ConfigParser()
@@ -254,25 +253,24 @@ class OscConfigParser(ConfigParser):
                     #cursect[optname] = "%s\n%s" % (cursect[optname], value)
                     #self.set(cursect, optname, "%s\n%s" % (self.get(cursect, optname), value))
                     if cursect == configparser.DEFAULTSECT:
-                        self._defaults[optname] = "%s\n%s" % (self._defaults[optname], value)
+                        self._defaults[optname] = f"{self._defaults[optname]}\n{value}"
                     else:
                         # use the raw value here (original version uses raw=False)
-                        self._sections[cursect]._find(optname).value = '%s\n%s' % (self.get(cursect, optname, raw=True), value)
+                        self._sections[cursect]._find(optname).value = f'{self.get(cursect, optname, raw=True)}\n{value}'
             # a section header or option header?
             else:
                 # is it a section header?
                 mo = self.SECTCRE.match(line)
                 if mo:
                     sectname = mo.group('header')
-                    if sectname in self._sections:
+                    if self._strict and sectname in self._sections:
+                        raise configparser.DuplicateSectionError(sectname, fpname, lineno)
+                    elif sectname in self._sections:
                         cursect = self._sections[sectname]
                     elif sectname == configparser.DEFAULTSECT:
                         cursect = self._defaults
                     else:
-                        #cursect = {'__name__': sectname}
-                        #self._sections[sectname] = cursect
                         self.add_section(sectname)
-                        self.set(sectname, '__name__', sectname)
                     # So sections can't start with a continuation line
                     cursect = sectname
                     optname = None
@@ -288,14 +286,16 @@ class OscConfigParser(ConfigParser):
                             # ';' is a comment delimiter only if it follows
                             # a spacing character
                             pos = optval.find(';')
-                            if pos != -1 and optval[pos-1].isspace():
+                            if pos != -1 and optval[pos - 1].isspace():
                                 optval = optval[:pos]
                         optval = optval.strip()
                         # allow empty values
                         if optval == '""':
                             optval = ''
                         optname = self.optionxform(optname.rstrip())
-                        if cursect == configparser.DEFAULTSECT:
+                        if self._strict and optname in self._sections[cursect]:
+                            raise configparser.DuplicateOptionError(sectname, optname, fpname, lineno)
+                        elif cursect == configparser.DEFAULTSECT:
                             self._defaults[optname] = optval
                         else:
                             self._sections[cursect]._add_option(optname, line=line)
@@ -309,9 +309,9 @@ class OscConfigParser(ConfigParser):
                         e.append(lineno, repr(line))
         # if any parsing errors occurred, raise an exception
         if e:
-            raise e # pylint: disable-msg=E0702
+            raise e  # pylint: disable-msg=E0702
 
-    def write(self, fp, comments = False):
+    def write(self, fp, comments=False):
         """
         write the configuration file. If comments is True all comments etc.
         will be written to fp otherwise the ConfigParsers' default write method
@@ -321,7 +321,7 @@ class OscConfigParser(ConfigParser):
             fp.write(str(self))
             fp.write('\n')
         else:
-            ConfigParser.write(self, fp)
+            super().write(fp)
 
     def has_option(self, section, option, proper=False, **kwargs):
         """
@@ -331,7 +331,7 @@ class OscConfigParser(ConfigParser):
         """
         if proper:
             return self.optionxform(option) in self._sections[section].keys()
-        return ConfigParser.has_option(self, section, option, **kwargs)
+        return super().has_option(section, option, **kwargs)
 
     # XXX: simplify!
     def __str__(self):
@@ -343,10 +343,8 @@ class OscConfigParser(ConfigParser):
                     first = False
                 else:
                     ret.append('')
-                ret.append('[%s]' % line.name)
+                ret.append(f'[{line.name}]')
                 for sline in line._lines:
-                    if sline.name == '__name__':
-                        continue
                     if sline.type == 'option':
                         # special handling for continuation lines
                         val = '\n '.join(sline.value.split('\n'))

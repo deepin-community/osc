@@ -3,43 +3,11 @@
 # and distributed under the terms of the GNU General Public Licence,
 # either version 2, or (at your option) any later version.
 
-try:
-    import html
-except ImportError:
-    import cgi as html
 
-from osc import oscerr
+import builtins
+import html
 
-def cmp_to_key(mycmp):
-    """ Converts a cmp= function into a key= function.
-    """
-
-    class K(object):
-        def __init__(self, obj, *args):
-            self.obj = obj
-
-        def __lt__(self, other):
-            return mycmp(self.obj, other.obj) < 0
-
-        def __gt__(self, other):
-            return mycmp(self.obj, other.obj) > 0
-
-        def __eq__(self, other):
-            return mycmp(self.obj, other.obj) == 0
-
-        def __le__(self, other):
-            return mycmp(self.obj, other.obj) <= 0
-
-        def __ge__(self, other):
-            return mycmp(self.obj, other.obj) >= 0
-
-        def __ne__(self, other):
-            return mycmp(self.obj, other.obj) != 0
-
-        def __hash__(self):
-            raise TypeError('hash not implemented')
-
-    return K
+from .. import oscerr
 
 
 def decode_list(ilist):
@@ -56,32 +24,23 @@ def decode_list(ilist):
 
 
 def decode_it(obj):
-    """ Decodes the given object if obj is not a string
-        based on the chardet module if possible
-    """
+    """Decode the given object unless it is a str.
 
-    if obj is None or isinstance(obj, str):
+    If the given object is a str or has no decode method, the object itself is
+    returned. Otherwise, try to decode the object using utf-8. If this
+    fails due to a UnicodeDecodeError, try to decode the object using
+    latin-1.
+    """
+    if isinstance(obj, str) or not hasattr(obj, 'decode'):
         return obj
-    else:
-        try:
-            import chardet
-            return obj.decode(chardet.detect(obj)['encoding'])
-        except:
-            try:
-                import locale
-                return obj.decode(locale.getlocale()[1])
-            except:
-                return obj.decode('latin-1')
+    try:
+        return obj.decode('utf-8')
+    except UnicodeDecodeError:
+        return obj.decode('latin-1')
 
 
 def raw_input(*args):
-    try:
-        import builtins
-        func = builtins.input
-    except ImportError:
-        #python 2.7
-        import __builtin__
-        func = __builtin__.raw_input
+    func = builtins.input
 
     try:
         return func(*args)
@@ -92,3 +51,22 @@ def raw_input(*args):
 
 def _html_escape(data):
     return html.escape(data, quote=False)
+
+
+def format_table(rows, headers):
+    """Format list of tuples into equal width table with headers"""
+    maxlens = [len(h) for h in headers]
+    for r in rows:
+        for i, c in enumerate(r):
+            maxlens[i] = max(maxlens[i], len(c))
+    tpltpl = []
+    for i, m in enumerate(maxlens):
+        tpltpl.append('{%s:<%s}' % (i, m))
+    # {0:12}  {1:7}  {2:10}  {3:8}
+    templ = '  '.join(tpltpl) + '\n'
+
+    out = templ.format(*headers)
+    out += templ.format(*['-' * m for m in maxlens])
+    for r in rows:
+        out += templ.format(*r)
+    return out

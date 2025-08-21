@@ -1,0 +1,36 @@
+Description: Revert "Tell the build script to disable repos/containers
+ handling for normal builds".
+ This commit introduced a change which is not compatible with obs-build currently
+ in Debian. So, revert it for now until obs-build is updated in Debian.
+Bug-Debian: http://bugs.debian.org/1098815
+Forwarded: not-needed
+
+This reverts commit 9b7fb4c2bec40f0428f75a98f2dfb87cd0985da7.
+---
+ osc/build.py     | 8 ++------
+
+--- a/osc/build.py
++++ b/osc/build.py
+@@ -1273,9 +1273,9 @@
+ 
+     # Make packages from buildinfo available as repos for kiwi/docker/fissile
+     if build_type in ('kiwi', 'docker', 'podman', 'fissile', 'productcompose'):
+-        if os.path.lexists('repos'):
++        if os.path.exists('repos'):
+             shutil.rmtree('repos')
+-        if os.path.lexists('containers'):
++        if os.path.exists('containers'):
+             shutil.rmtree('containers')
+         os.mkdir('repos')
+         for i in bi.deps:
+@@ -1349,10 +1349,6 @@
+                 else:
+                     os.symlink(path, tffn)
+ 
+-    else:
+-        buildargs.append("--repos-directory=-")
+-        buildargs.append("--containers-directory=-")
+-
+     if build_type == 'kiwi':
+         # Is a obsrepositories tag used?
+         try:

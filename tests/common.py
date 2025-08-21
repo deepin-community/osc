@@ -1,26 +1,20 @@
-import unittest
-import osc.core
-import shutil
-import tempfile
+import io
 import os
+import shutil
 import sys
-from xml.etree import cElementTree as ET
-EXPECTED_REQUESTS = []
+import tempfile
+import unittest
+from unittest.mock import patch
+from urllib.request import HTTPHandler, addinfourl, build_opener
+from urllib.parse import urlparse, parse_qs
+from xml.etree import ElementTree as ET
 
-if sys.version_info[0:2] in ((2, 6), (2, 7)):
-    bytes = lambda x, *args: x
+import urllib3.response
 
-try:
-    #python 2.x
-    from cStringIO import StringIO
-    from urllib2 import HTTPHandler, addinfourl, build_opener
-    from urlparse import urlparse, parse_qs
-except ImportError:
-    from io import StringIO
-    from urllib.request import HTTPHandler, addinfourl, build_opener
-    from urllib.parse import urlparse, parse_qs
+import osc.conf
+import osc.core
+from osc.util.xml import xml_fromstring
 
-from io import BytesIO
 
 def urlcompare(url, *args):
     """compare all components of url except query string - it is converted to
@@ -39,16 +33,41 @@ def urlcompare(url, *args):
         query_args2 = parse_qs(components2.query)
         components2 = components2._replace(query=None)
 
-        if  components != components2 or \
-            query_args != query_args2:
+        if components != components2 or \
+                query_args != query_args2:
             return False
 
     return True
 
+
+def xml_equal(actual, exp):
+    try:
+        actual_xml = xml_fromstring(actual)
+        exp_xml = xml_fromstring(exp)
+    except ET.ParseError:
+        return False
+    todo = [(actual_xml, exp_xml)]
+    while todo:
+        actual_xml, exp_xml = todo.pop(0)
+        if actual_xml.tag != exp_xml.tag:
+            return False
+        if actual_xml.attrib != exp_xml.attrib:
+            return False
+        if actual_xml.text != exp_xml.text:
+            return False
+        if actual_xml.tail != exp_xml.tail:
+            return False
+        if len(actual_xml) != len(exp_xml):
+            return False
+        todo.extend(list(zip(actual_xml, exp_xml)))
+    return True
+
+
 class RequestWrongOrder(Exception):
     """raised if an unexpected request is issued to urllib2"""
+
     def __init__(self, url, exp_url, method, exp_method):
-        Exception.__init__(self)
+        super().__init__()
         self.url = url
         self.exp_url = exp_url
         self.method = method
@@ -57,8 +76,10 @@ class RequestWrongOrder(Exception):
     def __str__(self):
         return '%s, %s, %s, %s' % (self.url, self.exp_url, self.method, self.exp_method)
 
+
 class RequestDataMismatch(Exception):
     """raised if POSTed or PUTed data doesn't match with the expected data"""
+
     def __init__(self, url, got, exp):
         self.url = url
         self.got = got
@@ -67,117 +88,156 @@ class RequestDataMismatch(Exception):
     def __str__(self):
         return '%s, %s, %s' % (self.url, self.got, self.exp)
 
-class MyHTTPHandler(HTTPHandler):
-    def __init__(self, exp_requests, fixtures_dir):
-        HTTPHandler.__init__(self)
-        self.__exp_requests = exp_requests
-        self.__fixtures_dir = fixtures_dir
 
-    def http_open(self, req):
-        r = self.__exp_requests.pop(0)
-        if not urlcompare(req.get_full_url(), r[1]) or req.get_method() != r[0]:
-            raise RequestWrongOrder(req.get_full_url(), r[1], req.get_method(), r[0])
-        if req.get_method() in ('GET', 'DELETE'):
-            return self.__mock_GET(r[1], **r[2])
-        elif req.get_method() in ('PUT', 'POST'):
-            return self.__mock_PUT(req, **r[2])
+EXPECTED_REQUESTS = []
 
-    def __mock_GET(self, fullurl, **kwargs):
-        return self.__get_response(fullurl, **kwargs)
 
-    def __mock_PUT(self, req, **kwargs):
-        exp = kwargs.get('exp', None)
-        if exp is not None and 'expfile' in kwargs:
-            raise RuntimeError('either specify exp or expfile')
-        elif 'expfile' in kwargs:
-            exp = open(os.path.join(self.__fixtures_dir, kwargs['expfile']), 'r').read()
-        elif exp is None:
-            raise RuntimeError('exp or expfile required')
-        if exp is not None:
-            # use req.data instead of req.get_data() for python3 compatiblity
-            data = req.data
-            if hasattr(data, 'read'):
-                data = data.read()
-            if data != bytes(exp, "utf-8"):
-                raise RequestDataMismatch(req.get_full_url(), repr(data), repr(exp))
-        return self.__get_response(req.get_full_url(), **kwargs)
+# HACK: Fix "ValueError: I/O operation on closed file." error in tests on openSUSE Leap 15.2.
+#       The problem seems to appear only in the tests, possibly some interaction with MockHTTPConnectionPool.
+#       Porting 753fbc03 to urllib3 in openSUSE Leap 15.2 would fix the problem.
+urllib3.response.HTTPResponse.__iter__ = lambda self: iter(self._fp)
 
-    def __get_response(self, url, **kwargs):
-        f = None
-        if 'exception' in kwargs:
-            raise kwargs['exception']
-        if 'text' not in kwargs and 'file' in kwargs:
-            f = BytesIO(open(os.path.join(self.__fixtures_dir, kwargs['file']), 'rb').read())
-        elif 'text' in kwargs and 'file' not in kwargs:
-            f = BytesIO(bytes(kwargs['text'], 'utf-8'))
+
+class MockHTTPConnectionPool:
+    def __init__(self, host, port=None, **conn_kw):
+        pass
+
+    def urlopen(self, method, url, body=None, headers=None, retries=None, **response_kw):
+        global EXPECTED_REQUESTS
+        request = EXPECTED_REQUESTS.pop(0)
+
+        url = f"http://localhost{url}"
+
+        if not urlcompare(request["url"], url) or request["method"] != method:
+            raise RequestWrongOrder(request["url"], url, request["method"], method)
+
+        if method in ("POST", "PUT"):
+            if 'exp' not in request and 'expfile' in request:
+                with open(request['expfile'], 'rb') as f:
+                    exp = f.read()
+            elif 'exp' in request and 'expfile' not in request:
+                exp = request['exp'].encode('utf-8')
+            else:
+                raise RuntimeError('Specify either `exp` or `expfile`')
+
+            body = body or b""
+            if hasattr(body, "read"):
+                # if it is a file-like object, read it
+                body = body.read()
+            if hasattr(body, "encode"):
+                # if it can be encoded to bytes, do it
+                body = body.encode("utf-8")
+
+            if body != exp:
+                # We do not have a notion to explicitly mark xml content. In case
+                # of xml, we do not care about the exact xml representation (for
+                # now). Hence, if both, data and exp, are xml and are "equal",
+                # everything is fine (for now); otherwise, error out
+                # (of course, this is problematic if we want to ensure that XML
+                # documents are bit identical...)
+                if not xml_equal(body, exp):
+                    raise RequestDataMismatch(url, repr(body), repr(exp))
+
+        if 'exception' in request:
+            raise request["exception"]
+
+        if 'text' not in request and 'file' in request:
+            with open(request['file'], 'rb') as f:
+                data = f.read()
+        elif 'text' in request and 'file' not in request:
+            data = request['text'].encode('utf-8')
         else:
-            raise RuntimeError('either specify text or file')
-        resp = addinfourl(f, {}, url)
-        resp.code = kwargs.get('code', 200)
-        resp.msg = ''
-        return resp
+            raise RuntimeError('Specify either `text` or `file`')
 
-def urldecorator(method, fullurl, **kwargs):
+        response = urllib3.response.HTTPResponse(body=data, status=request.get("code", 200))
+        response._fp = io.BytesIO(data)
+
+        return response
+
+
+def urldecorator(method, url, **kwargs):
     def decorate(test_method):
-        def wrapped_test_method(*args):
-            addExpectedRequest(method, fullurl, **kwargs)
-            test_method(*args)
-        # "rename" method otherwise we cannot specify a TestCaseClass.testName
-        # cmdline arg when using unittest.main()
+        def wrapped_test_method(self):
+            # put all args into a single dictionary
+            kwargs["method"] = method
+            kwargs["url"] = url
+
+            # prepend fixtures dir to `file`
+            if "file" in kwargs:
+                kwargs["file"] = os.path.join(self._get_fixtures_dir(), kwargs["file"])
+
+            # prepend fixtures dir to `expfile`
+            if "expfile" in kwargs:
+                kwargs["expfile"] = os.path.join(self._get_fixtures_dir(), kwargs["expfile"])
+
+            EXPECTED_REQUESTS.append(kwargs)
+
+            test_method(self)
+
+        # mock connection pool, but only just once
+        if not hasattr(test_method, "_MockHTTPConnectionPool"):
+            wrapped_test_method = patch('urllib3.HTTPConnectionPool', MockHTTPConnectionPool)(wrapped_test_method)
+            wrapped_test_method._MockHTTPConnectionPool = True
+
         wrapped_test_method.__name__ = test_method.__name__
         return wrapped_test_method
     return decorate
 
-def GET(fullurl, **kwargs):
-    return urldecorator('GET', fullurl, **kwargs)
 
-def PUT(fullurl, **kwargs):
-    return urldecorator('PUT', fullurl, **kwargs)
+def GET(path, **kwargs):
+    return urldecorator('GET', path, **kwargs)
 
-def POST(fullurl, **kwargs):
-    return urldecorator('POST', fullurl, **kwargs)
 
-def DELETE(fullurl, **kwargs):
-    return urldecorator('DELETE', fullurl, **kwargs)
+def PUT(path, **kwargs):
+    return urldecorator('PUT', path, **kwargs)
 
-def addExpectedRequest(method, url, **kwargs):
-    global EXPECTED_REQUESTS
-    EXPECTED_REQUESTS.append((method, url, kwargs))
+
+def POST(path, **kwargs):
+    return urldecorator('POST', path, **kwargs)
+
+
+def DELETE(path, **kwargs):
+    return urldecorator('DELETE', path, **kwargs)
+
 
 class OscTestCase(unittest.TestCase):
     def setUp(self, copytree=True):
+        global EXPECTED_REQUESTS
+        EXPECTED_REQUESTS = []
+        os.chdir(os.path.dirname(__file__))
         oscrc = os.path.join(self._get_fixtures_dir(), 'oscrc')
-        osc.core.conf.get_config(override_conffile=oscrc,
-                                 override_no_keyring=True, override_no_gnome_keyring=True)
+        osc.conf.get_config(override_conffile=oscrc, override_no_keyring=True)
         os.environ['OSC_CONFIG'] = oscrc
 
         self.tmpdir = tempfile.mkdtemp(prefix='osc_test')
         if copytree:
             shutil.copytree(os.path.join(self._get_fixtures_dir(), 'osctest'), os.path.join(self.tmpdir, 'osctest'))
-        global EXPECTED_REQUESTS
-        EXPECTED_REQUESTS = []
-        osc.core.conf._build_opener = lambda u: build_opener(MyHTTPHandler(EXPECTED_REQUESTS, self._get_fixtures_dir()))
         self.stdout = sys.stdout
-        sys.stdout = StringIO()
+        sys.stdout = io.StringIO()
 
     def tearDown(self):
-        self.assertTrue(len(EXPECTED_REQUESTS) == 0)
         sys.stdout = self.stdout
         try:
             shutil.rmtree(self.tmpdir)
         except:
             pass
+        os.environ.pop("OSC_CONFIG", "")
+        self.assertTrue(len(EXPECTED_REQUESTS) == 0)
 
     def _get_fixtures_dir(self):
         raise NotImplementedError('subclasses should implement this method')
+
+    def _get_fixture(self, filename):
+        path = os.path.join(self._get_fixtures_dir(), filename)
+        with open(path) as f:
+            return f.read()
 
     def _change_to_pkg(self, name):
         os.chdir(os.path.join(self.tmpdir, 'osctest', name))
 
     def _check_list(self, fname, exp):
         fname = os.path.join('.osc', fname)
-        self.assertTrue(os.path.exists(fname))
-        self.assertEqual(open(fname, 'r').read(), exp)
+        self.assertFileContentEqual(fname, exp)
 
     def _check_addlist(self, exp):
         self._check_list('_to_be_added', exp)
@@ -193,20 +253,49 @@ class OscTestCase(unittest.TestCase):
 
     def _check_digests(self, fname, *skipfiles):
         fname = os.path.join(self._get_fixtures_dir(), fname)
-        self.assertEqual(open(os.path.join('.osc', '_files'), 'r').read(), open(fname, 'r').read())
-        root = ET.parse(fname).getroot()
+        with open(os.path.join('.osc', '_files')) as f:
+            files_act = f.read()
+        with open(fname) as f:
+            files_exp = f.read()
+        self.assertXMLEqual(files_act, files_exp)
+        root = xml_fromstring(files_act)
         for i in root.findall('entry'):
             if i.get('name') in skipfiles:
                 continue
-            self.assertTrue(os.path.exists(os.path.join('.osc', i.get('name'))))
-            self.assertEqual(osc.core.dgst(os.path.join('.osc', i.get('name'))), i.get('md5'))
+            self.assertTrue(os.path.exists(os.path.join('.osc', 'sources', i.get('name'))))
+            self.assertEqual(osc.core.dgst(os.path.join('.osc', 'sources', i.get('name'))), i.get('md5'))
+
+    def assertFilesEqual(self, first, second):
+        self.assertTrue(os.path.exists(first))
+        self.assertTrue(os.path.exists(second))
+        with open(first) as f1, open(second) as f2:
+            self.assertEqual(f1.read(), f2.read())
+
+    def assertFileContentEqual(self, file_path, expected_content):
+        self.assertTrue(os.path.exists(file_path))
+        with open(file_path) as f:
+            self.assertEqual(f.read(), expected_content)
+
+    def assertFileContentNotEqual(self, file_path, expected_content):
+        self.assertTrue(os.path.exists(file_path))
+        with open(file_path) as f:
+            self.assertNotEqual(f.read(), expected_content)
+
+    def assertXMLEqual(self, act, exp):
+        if xml_equal(act, exp):
+            return
+        # ok, xmls are different, hence, assertEqual is expected to fail
+        # (we just use it in order to get a "nice" error message)
+        self.assertEqual(act, exp)
+        # not reached (unless assertEqual is overridden in an incompatible way)
+        raise RuntimeError('assertEqual assumptions violated')
 
     def assertEqualMultiline(self, got, exp):
         if (got + exp).find('\n') == -1:
             self.assertEqual(got, exp)
         else:
             start_delim = "\n" + (" 8< ".join(["-----"] * 8)) + "\n"
-            end_delim   = "\n" + (" >8 ".join(["-----"] * 8)) + "\n\n"
+            end_delim = "\n" + (" >8 ".join(["-----"] * 8)) + "\n\n"
             self.assertEqual(got, exp,
-                             "got:"      + start_delim + got + end_delim +
+                             "got:" + start_delim + got + end_delim +
                              "expected:" + start_delim + exp + end_delim)

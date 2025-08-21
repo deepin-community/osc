@@ -1,5 +1,8 @@
 #!/usr/bin/make -f
 
+export HOME=$(CURDIR)/debian/fake-home
+export XDG_STATE_HOME =  $(HOME)/.local/state
+
 %:
 	dh $@ --with python3,bash-completion --buildsystem=pybuild
 
@@ -10,7 +13,28 @@ override_dh_clean:
 	# Exclude testsuite data
 	dh_clean --exclude=foo.orig
 
-override_dh_auto_install:
-	dh_auto_install
-	# Give the binary sane name
-	mv $(CURDIR)/debian/osc/usr/bin/osc-wrapper.py $(CURDIR)/debian/osc/usr/bin/osc
+execute_after_dh_auto_build:
+	# This symlink is required to run the tests
+	for d in .pybuild/*/build; do ln -srv doc $$d; done
+	# build man page
+	PYTHONPATH=. argparse-manpage \
+		--output=osc.1 \
+		--format=single-commands-section \
+		--module=osc.commandline \
+		--function=argparse_manpage_get_parser \
+		--project-name=osc \
+		--prog=osc \
+		--description="openSUSE build service command-line tool" \
+		--author="Contributors to the osc project." \
+		--url="https://github.com/openSUSE/osc/"
+
+ifneq ($(FAKEROOTKEY),)
+override_dh_auto_test:
+	mkdir -p $(XDG_STATE_HOME)
+	LD_PRELOAD= dh_auto_test
+endif
+
+execute_before_dh_auto_install:
+	# Remove symlinks to avoid installing files into
+	# /usr/lib/python3/dist-packages/doc/ (#1081339)
+	for d in .pybuild/*/build; do unlink $$d/doc; done

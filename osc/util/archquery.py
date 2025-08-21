@@ -1,29 +1,29 @@
-
-from __future__ import print_function
-
-import os.path
+import os
 import re
-import tarfile
-from . import packagequery
 import subprocess
+import sys
+
+from . import packagequery
+
 
 class ArchError(packagequery.PackageError):
     pass
+
 
 class ArchQuery(packagequery.PackageQuery, packagequery.PackageQueryResult):
     def __init__(self, fh):
         self.__file = fh
         self.__path = os.path.abspath(fh.name)
         self.fields = {}
-        #self.magic = None
-        #self.pkgsuffix = 'pkg.tar.gz'
+        # self.magic = None
+        # self.pkgsuffix = 'pkg.tar.gz'
         self.pkgsuffix = b'arch'
 
     def read(self, all_tags=True, self_provides=True, *extra_tags):
         # all_tags and *extra_tags are currently ignored
         f = open(self.__path, 'rb')
-        #self.magic = f.read(5)
-        #if self.magic == '\375\067zXZ':
+        # self.magic = f.read(5)
+        # if self.magic == '\375\067zXZ':
         #    self.pkgsuffix = 'pkg.tar.xz'
         fn = open('/dev/null', 'wb')
         pipe = subprocess.Popen(['tar', '-O', '-xf', self.__path, '.PKGINFO'], stdout=subprocess.PIPE, stderr=fn).stdout
@@ -52,14 +52,14 @@ class ArchQuery(packagequery.PackageQuery, packagequery.PackageQueryResult):
 
     def version(self):
         pkgver = self.fields['pkgver'][0] if 'pkgver' in self.fields else None
-        if pkgver != None:
+        if pkgver is not None:
             pkgver = re.sub(br'[0-9]+:', b'', pkgver, 1)
             pkgver = re.sub(br'-[^-]*$', b'', pkgver)
         return pkgver
 
     def release(self):
         pkgver = self.fields['pkgver'][0] if 'pkgver' in self.fields else None
-        if pkgver != None:
+        if pkgver is not None:
             m = re.search(br'-([^-])*$', pkgver)
             if m:
                 return m.group(1)
@@ -136,7 +136,7 @@ class ArchQuery(packagequery.PackageQuery, packagequery.PackageQueryResult):
         return None
 
     @staticmethod
-    def query(filename, all_tags = False, *extra_tags):
+    def query(filename, all_tags=False, *extra_tags):
         f = open(filename, 'rb')
         archq = ArchQuery(f)
         archq.read(all_tags, *extra_tags)
@@ -163,8 +163,8 @@ class ArchQuery(packagequery.PackageQuery, packagequery.PackageQueryResult):
             if not (len(ver1) and len(ver2)):
                 break
             # check if we have a digits segment
-            mo1 = re.match(b'(\d+)', ver1)
-            mo2 = re.match(b'(\d+)', ver2)
+            mo1 = re.match(br'(\d+)', ver1)
+            mo2 = re.match(br'(\d+)', ver2)
             numeric = True
             if mo1 is None:
                 mo1 = re.match(b'([a-zA-Z]+)', ver1)
@@ -208,7 +208,6 @@ class ArchQuery(packagequery.PackageQuery, packagequery.PackageQueryResult):
 
 
 if __name__ == '__main__':
-    import sys
     archq = ArchQuery.query(sys.argv[1])
     print(archq.name(), archq.version(), archq.release(), archq.arch())
     try:

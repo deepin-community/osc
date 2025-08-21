@@ -1,13 +1,12 @@
-
-from __future__ import print_function
-
-from . import ar
-import os.path
+import itertools
+import os
 import re
+import sys
 import tarfile
 from io import BytesIO
+
+from . import ar
 from . import packagequery
-import itertools
 
 
 HAVE_LZMA = True
@@ -16,67 +15,99 @@ try:
 except ImportError:
     HAVE_LZMA = False
 
-
-if (not hasattr(itertools, 'zip_longest')
-    and hasattr(itertools, 'izip_longest')):
-    # python2 case
-    itertools.zip_longest = itertools.izip_longest
+HAVE_ZSTD = True
+try:
+    # Note: zstd is not supporting stream compression types
+    import zstandard
+except ImportError:
+    HAVE_ZSTD = False
 
 
 class DebError(packagequery.PackageError):
     pass
 
+
 class DebQuery(packagequery.PackageQuery, packagequery.PackageQueryResult):
 
-    default_tags = (b'package', b'version', b'release', b'epoch',
+    default_tags = (
+        b'package', b'version', b'release', b'epoch',
         b'architecture', b'description', b'provides', b'depends',
-        b'pre_depends', b'conflicts', b'breaks')
+        b'pre_depends', b'conflicts', b'breaks'
+    )
 
     def __init__(self, fh):
-        self.__file = fh
-        self.__path = os.path.abspath(fh.name)
+        self._file = fh
+        self._path = os.path.abspath(fh.name)
         self.filename_suffix = 'deb'
         self.fields = {}
 
     def read(self, all_tags=False, self_provides=True, *extra_tags):
-        arfile = ar.Ar(fh = self.__file)
+        arfile = ar.Ar(fh=self._file)
         arfile.read()
         debbin = arfile.get_file(b'debian-binary')
         if debbin is None:
-            raise DebError(self.__path, 'no debian binary')
+            raise DebError(self._path, 'no debian binary')
         if debbin.read() != b'2.0\n':
-            raise DebError(self.__path, 'invalid debian binary format')
-        control = arfile.get_file(b'control.tar.gz')
-        if control is not None:
-            # XXX: python2.4 relies on a name
-            tar = tarfile.open(name='control.tar.gz', fileobj=control)
-        else:
-            control = arfile.get_file(b'control.tar.xz')
-            if control is None:
-                raise DebError(self.__path, 'missing control.tar')
-            if not HAVE_LZMA:
-                raise DebError(self.__path, 'can\'t open control.tar.xz without python-lzma')
-            decompressed = lzma.decompress(control.read())
-            tar = tarfile.open(name="control.tar.xz",
-                               fileobj=BytesIO(decompressed))
+            raise DebError(self._path, 'invalid debian binary format')
+        for open_func in [self._open_tar_gz,
+                          self._open_tar_xz,
+                          self._open_tar_zst,
+                          self._open_tar]:
+            tar = open_func(arfile)
+            if tar is not None:
+                break
+        if tar is None:
+            raise DebError(self._path, 'missing control.tar')
         try:
             name = './control'
-            # workaround for python2.4's tarfile module
-            if 'control' in tar.getnames():
-                name = 'control'
             control = tar.extractfile(name)
         except KeyError:
-            raise DebError(self.__path,
+            raise DebError(self._path,
                            'missing \'control\' file in control.tar')
-        self.__parse_control(control, all_tags, self_provides, *extra_tags)
+        self._parse_control(control, all_tags, self_provides, *extra_tags)
         return self
 
-    def __parse_control(self, control, all_tags=False, self_provides=True, *extra_tags):
+    def _open_tar(self, arfile):
+        control = arfile.get_file(b'control.tar')
+        if not control:
+            return None
+
+        return tarfile.open(fileobj=control)
+
+    def _open_tar_gz(self, arfile):
+        control = arfile.get_file(b'control.tar.gz')
+        if not control:
+            return None
+
+        return tarfile.open(fileobj=control)
+
+    def _open_tar_xz(self, arfile):
+        control = arfile.get_file(b'control.tar.xz')
+        if not control:
+            return None
+
+        if not HAVE_LZMA:
+            raise DebError(self._path, 'can\'t open control.tar.xz without python-lzma')
+        decompressed = lzma.decompress(control.read())
+        return tarfile.open(fileobj=BytesIO(decompressed))
+
+    def _open_tar_zst(self, arfile):
+        control = arfile.get_file(b'control.tar.zst')
+        if not control:
+            return None
+
+        if not HAVE_ZSTD:
+            raise DebError(self._path, 'can\'t open control.tar.zst without python-zstandard')
+        with zstandard.ZstdDecompressor().stream_reader(BytesIO(control.read())) as reader:
+            decompressed = reader.read()
+        return tarfile.open(fileobj=BytesIO(decompressed))
+
+    def _parse_control(self, control, all_tags=False, self_provides=True, *extra_tags):
         data = control.readline().strip()
         while data:
-            field, val = re.split(b':\s*', data.strip(), 1)
+            field, val = re.split(br':\s*', data.strip(), 1)
             data = control.readline()
-            while data and re.match(b'\s+', data):
+            while data and re.match(br'\s+', data):
                 val += b'\n' + data.strip()
                 data = control.readline().rstrip()
             field = field.replace(b'-', b'_').lower()
@@ -107,7 +138,7 @@ class DebQuery(packagequery.PackageQuery, packagequery.PackageQueryResult):
             # add self provides entry
             self.fields[b'provides'].append(b'%s (= %s)' % (self.name(), b'-'.join(versrel)))
 
-    def _split_field_value(self, field, delimeter=b',\s*'):
+    def _split_field_value(self, field, delimeter=br',\s*'):
         return [i.strip()
                 for i in re.split(delimeter, self.fields.get(field, b'')) if i]
 
@@ -140,7 +171,7 @@ class DebQuery(packagequery.PackageQuery, packagequery.PackageQueryResult):
         return self.fields[b'description']
 
     def path(self):
-        return self.__path
+        return self._path
 
     def provides(self):
         return self.fields[b'provides']
@@ -174,7 +205,7 @@ class DebQuery(packagequery.PackageQuery, packagequery.PackageQueryResult):
         return DebQuery.filename(self.name(), self.epoch(), self.version(), self.release(), self.arch())
 
     @staticmethod
-    def query(filename, all_tags = False, *extra_tags):
+    def query(filename, all_tags=False, *extra_tags):
         f = open(filename, 'rb')
         debq = DebQuery(f)
         debq.read(all_tags, *extra_tags)
@@ -188,8 +219,8 @@ class DebQuery(packagequery.PackageQuery, packagequery.PackageQueryResult):
         """
         # 32 is arbitrary - it is needed for the "longer digit string wins" handling
         # (found this nice approach in Build/Deb.pm (build package))
-        ver1 = re.sub(b'(\d+)', lambda m: (32 * b'0' + m.group(1))[-32:], ver1)
-        ver2 = re.sub(b'(\d+)', lambda m: (32 * b'0' + m.group(1))[-32:], ver2)
+        ver1 = re.sub(br'(\d+)', lambda m: (32 * b'0' + m.group(1))[-32:], ver1)
+        ver2 = re.sub(br'(\d+)', lambda m: (32 * b'0' + m.group(1))[-32:], ver2)
         vers = itertools.zip_longest(ver1, ver2, fillvalue=b'')
         for v1, v2 in vers:
             if v1 == v2:
@@ -233,8 +264,8 @@ class DebQuery(packagequery.PackageQuery, packagequery.PackageQueryResult):
         else:
             return b'%s_%s_%s.deb' % (name, version, arch)
 
+
 if __name__ == '__main__':
-    import sys
     try:
         debq = DebQuery.query(sys.argv[1])
     except DebError as e:

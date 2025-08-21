@@ -1,15 +1,148 @@
-osc (0.169.1-2deepin2) unstable; urgency=medium
+osc (1.15.1-1) unstable; urgency=medium
 
-  * Apply upstream fix for python 3.12 deprecated API readfp()
-    https://github.com/openSUSE/osc/pull/1446
+  * New upstream version 1.15.1
 
- -- Cryolitia <liziyao@uniontech.com>  Wed, 16 Apr 2025 17:36:42 +0800
+ -- Héctor Orón Martínez <zumbi@debian.org>  Mon, 12 May 2025 12:43:49 +0200
 
-osc (0.169.1-2deepin1) unstable; urgency=medium
+osc (1.14.0-1) unstable; urgency=medium
 
-  * Replace imp with importlib
+  * New upstream version 1.14.0
 
- -- Tianyu Chen <sweetyfish@deepin.org>  Fri, 05 Jul 2024 09:59:09 +0200
+ -- Héctor Orón Martínez <zumbi@debian.org>  Mon, 12 May 2025 12:30:59 +0200
+
+osc (1.12.1-2) unstable; urgency=medium
+
+  * Revert changes not compatible with obs-build in Debian (Closes: #1098815)
+
+ -- Dylan Aïssi <daissi@debian.org>  Tue, 11 Mar 2025 16:06:58 +0100
+
+osc (1.12.1-1) unstable; urgency=medium
+
+  * New upstream version 1.12.1
+
+ -- Dylan Aïssi <daissi@debian.org>  Wed, 19 Feb 2025 09:43:36 +0100
+
+osc (1.12.0-1) unstable; urgency=medium
+
+  * New upstream version 1.12.0
+
+ -- Dylan Aïssi <daissi@debian.org>  Fri, 07 Feb 2025 10:02:05 +0100
+
+osc (1.11.1-1) unstable; urgency=medium
+
+  * New upstream version 1.11.1
+  * Drop hardcoded dependencies on python3 packages,
+      they are now automatically added when building the package.
+  * wrap-and-sort
+  * Add git in Build-Deps, used for tests
+  * Add debian/salsa-ci.yml
+
+ -- Dylan Aïssi <daissi@debian.org>  Fri, 10 Jan 2025 14:30:41 +0100
+
+osc (1.10.1-1) unstable; urgency=medium
+
+  * New upstream version 1.10.1
+  * Add python3-ruamel.yaml in Build-Deps
+  * Drop debian/source/lintian-overrides, no longer required
+
+ -- Dylan Aïssi <daissi@debian.org>  Tue, 12 Nov 2024 11:49:35 +0100
+
+osc (1.9.2-1) unstable; urgency=medium
+
+  * New upstream version 1.9.2
+
+ -- Dylan Aïssi <daissi@debian.org>  Mon, 30 Sep 2024 14:47:59 +0200
+
+osc (1.9.1-2) unstable; urgency=medium
+
+  * Remove symlinks created to run tests to avoid wrongly installing files
+    into /usr/lib/python3/dist-packages/doc/ (Closes: #1081339)
+
+ -- Dylan Aïssi <daissi@debian.org>  Wed, 11 Sep 2024 17:28:29 +0200
+
+osc (1.9.1-1) unstable; urgency=medium
+
+  * New upstream version 1.9.1
+  * Use https for Homepage
+
+ -- Dylan Aïssi <daissi@debian.org>  Sun, 01 Sep 2024 16:42:10 +0200
+
+osc (1.9.0-1) unstable; urgency=medium
+
+  * New upstream version 1.9.0
+    - Fix CVE-2024-22034
+  * Remove debian/preinst, no longer required
+  * Drop override_dh_auto_install: nothing to do here
+  * Add debian/upstream/metadata
+  * Refresh debian/copyright
+
+ -- Dylan Aïssi <daissi@debian.org>  Tue, 20 Aug 2024 11:22:00 +0200
+
+osc (1.8.3-1) unstable; urgency=medium
+
+  * New upstream version 1.8.3
+  * Add debian/source/lintian-overrides
+  * Drop patches included in upstream release
+
+ -- Dylan Aïssi <daissi@debian.org>  Mon, 05 Aug 2024 12:07:54 +0200
+
+osc (1.7.0-5) unstable; urgency=medium
+
+  [ Debian Janitor ]
+  * Update watch file format version to 4.
+  * Update standards version to 4.5.1, no changes needed.
+
+  [ Dylan Aïssi ]
+  * Update standards version to 4.7.0, no changes needed.
+  * Add superficial autopkgtest
+  * Fix syntax osc.lintian-overrides
+  * Add python3-argparse-manpage in Build-Deps
+  * Build manpage and install in package
+  * Create fake $XDG_STATE_HOME allowing tests to use it (Closes: #1077525)
+
+ -- Dylan Aïssi <daissi@debian.org>  Sun, 04 Aug 2024 14:59:49 +0200
+
+osc (1.7.0-4) unstable; urgency=medium
+
+  * Upload to unstable (Closes: #1074680, 1071094).
+  * Add Dylan to Uploaders.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 22 Jul 2024 16:28:05 +0200
+
+osc (1.7.0-3) experimental; urgency=medium
+
+  [ Dylan Aïssi ]
+  * Update Build-Deps.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Tue, 18 Jun 2024 10:50:20 +0200
+
+osc (1.7.0-2) experimental; urgency=medium
+
+  * Apply patches from the upstream:
+    - Fix 'mv' command when renaming a file multiple times
+    - Fix insecure extraction of 'ar' and 'cpio' archives by
+      forbidding extracting files with absolute paths.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 03 Jun 2024 11:35:46 +0200
+
+osc (1.7.0-1) experimental; urgency=medium
+
+  * New upstream release.
+  * Add Rules-Requires-Root: no.
+  * Prevent tests from running as fakeroot.
+  * Drop no longer necessary patches.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 03 Jun 2024 10:43:44 +0200
+
+osc (0.182.1-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Refresh patches.
+  * Install README from the new location.
+  * Install fish completions to vendor_completions.d.
+  * Add a missing dependency for tests.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 06 May 2024 13:39:36 +0200
 
 osc (0.169.1-2) unstable; urgency=medium
 

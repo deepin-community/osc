@@ -1,31 +1,36 @@
-from __future__ import print_function
-
-from tempfile import mkdtemp
-import os
-from shutil import rmtree
-import rpm
 import base64
+import os
+from tempfile import mkdtemp
+from shutil import rmtree
+
 
 class KeyError(Exception):
     def __init__(self, key, *args):
-        Exception.__init__(self)
+        super().__init__()
         self.args = args
         self.key = key
+
     def __str__(self):
-        return ''+self.key+' :'+' '.join(self.args)
+        return f"{self.key} :{' '.join(self.args)}"
+
 
 class Checker:
     def __init__(self):
+        import rpm
         self.dbdir = mkdtemp(prefix='oscrpmdb')
         self.imported = {}
+        # pylint: disable=E1101
         rpm.addMacro('_dbpath', self.dbdir)
         self.ts = rpm.TransactionSet()
         self.ts.initDB()
         self.ts.openDB()
         self.ts.setVSFlags(0)
-        #self.ts.Debug(1)
+        # self.ts.Debug(1)
 
-    def readkeys(self, keys=[]):
+    def readkeys(self, keys=None):
+        import rpm
+        keys = keys or []
+        # pylint: disable=E1101
         rpm.addMacro('_dbpath', self.dbdir)
         for key in keys:
             try:
@@ -33,9 +38,11 @@ class Checker:
             except KeyError as e:
                 print(e)
 
-        if not len(self.imported):
+        if not self.imported:
             raise KeyError('', "no key imported")
 
+        import rpm
+        # pylint: disable=E1101
         rpm.delMacro("_dbpath")
 
 # python is an idiot
@@ -50,7 +57,7 @@ class Checker:
         if file in self.imported:
             return
 
-        fd = open(file, "r")
+        fd = open(file)
         line = fd.readline()
         if line and line[0:14] == "-----BEGIN PGP":
             line = fd.readline()
@@ -68,7 +75,7 @@ class Checker:
             if line[0:12] == "-----END PGP":
                 break
             line = line.rstrip()
-            if (line[0] == '='):
+            if line[0] == '=':
                 crc = line[1:]
                 line = fd.readline()
                 break
@@ -99,6 +106,7 @@ class Checker:
         finally:
             if fd is not None:
                 os.close(fd)
+
 
 if __name__ == "__main__":
     import sys

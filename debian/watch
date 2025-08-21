@@ -1,2 +1,4 @@
-version=3
+version=4
 https://download.opensuse.org/repositories/openSUSE:/Tools/Debian_Unstable/ osc_([0-9.]*).orig.tar.gz
+
+# https://github.com/openSUSE/osc/tags .*/v?(\d.*)@ARCHIVE_EXT@

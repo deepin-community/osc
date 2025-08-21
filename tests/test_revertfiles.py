@@ -1,13 +1,18 @@
+import os
+import unittest
+
 import osc.core
 import osc.oscerr
-import os
-from common import OscTestCase
 
-FIXTURES_DIR = os.path.join(os.getcwd(), 'revertfile_fixtures')
+from .common import OscTestCase
+
+
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'revertfile_fixtures')
+
 
 def suite():
-    import unittest
-    return unittest.makeSuite(TestRevertFiles)
+    return unittest.defaultTestLoader.loadTestsFromTestCase(TestRevertFiles)
+
 
 class TestRevertFiles(OscTestCase):
     def _get_fixtures_dir(self):
@@ -87,11 +92,11 @@ class TestRevertFiles(OscTestCase):
         self.assertRaises(osc.oscerr.OscIOError, p.revert, 'skipped')
 
     def __check_file(self, fname):
-        storefile = os.path.join('.osc', fname)
+        storefile = os.path.join('.osc', 'sources', fname)
         self.assertTrue(os.path.exists(fname))
         self.assertTrue(os.path.exists(storefile))
-        self.assertEqual(open(fname, 'r').read(), open(storefile, 'r').read())
+        self.assertFilesEqual(fname, storefile)
+
 
 if __name__ == '__main__':
-    import unittest
     unittest.main()

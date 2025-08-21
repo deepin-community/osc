@@ -13,40 +13,38 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 
-from __future__ import print_function
 
 import os
 import re
-import sys
 import stat
-
+import sys
 from io import BytesIO
+from typing import Union
 
-
-# workaround for python24
-if not hasattr(os, 'SEEK_SET'):
-    os.SEEK_SET = 0
 
 class ArError(Exception):
     """Base class for all ar related errors"""
-    def __init__(self, fn, msg):
-        Exception.__init__(self)
+
+    def __init__(self, fn: bytes, msg: str):
+        super().__init__()
         self.file = fn
         self.msg = msg
 
     def __str__(self):
-        return 'ar error: %s' % self.msg
+        return f"{self.msg}: {self.file.decode('utf-8')}"
+
 
 class ArHdr:
     """Represents an ar header entry"""
-    def __init__(self, fn, date, uid, gid, mode, size, fmag, off):
+
+    def __init__(self, fn: bytes, date: bytes, uid: bytes, gid: bytes, mode: bytes, size: bytes, fmag: bytes, off: bytes):
         self.file = fn.strip()
         self.date = date.strip()
         self.uid = uid.strip()
         self.gid = gid.strip()
         if not mode.strip():
             # provide a dummy mode for the ext_fn hdr
-            mode = '0'
+            mode = b"0"
         self.mode = stat.S_IMODE(int(mode, 8))
         self.size = int(size)
         self.fmag = fmag
@@ -56,24 +54,34 @@ class ArHdr:
     def __str__(self):
         return '%16s %d' % (self.file, self.size)
 
+
 class ArFile(BytesIO):
     """Represents a file which resides in the archive"""
+
     def __init__(self, fn, uid, gid, mode, buf):
-        BytesIO.__init__(self, buf)
+        super().__init__(buf)
         self.name = fn
         self.uid = uid
         self.gid = gid
         self.mode = mode
 
-    def saveTo(self, dir = None):
+    def saveTo(self, dir=None):
         """
         writes file to dir/filename if dir isn't specified the current
         working dir is used. Additionally it tries to set the owner/group
         and permissions.
         """
+        if self.name.startswith(b"/"):
+            raise ArError(self.name, "Extracting files with absolute paths is not supported for security reasons")
+
         if not dir:
-            dir = os.getcwd()
-        fn = os.path.join(dir, self.name)
+            dir = os.getcwdb()
+        fn = os.path.join(dir, self.name.decode("utf-8"))
+
+        dir_path, _ = os.path.split(fn)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+
         with open(fn, 'wb') as f:
             f.write(self.getvalue())
         os.chmod(fn, self.mode)
@@ -81,13 +89,15 @@ class ArFile(BytesIO):
         if uid != os.geteuid() or os.geteuid() != 0:
             uid = -1
         gid = self.gid
-        if not gid in os.getgroups() or os.getegid() != 0:
+        if gid not in os.getgroups() or os.getegid() != 0:
             gid = -1
         os.chown(fn, uid, gid)
+        return fn
 
     def __str__(self):
         return '%s %s %s %s' % (self.name, self.uid,
                                 self.gid, self.mode)
+
 
 class Ar:
     """
@@ -98,10 +108,10 @@ class Ar:
     hdr_pat = re.compile(b'^(.{16})(.{12})(.{6})(.{6})(.{8})(.{10})(.{2})',
                          re.DOTALL)
 
-    def __init__(self, fn = None, fh = None):
-        if fn == None and fh == None:
-            raise ValueError('either \'fn\' or \'fh\' must be != None')
-        if fh != None:
+    def __init__(self, fn=None, fh=None):
+        if fn is None and fh is None:
+            raise ValueError('either \'fn\' or \'fh\' must be is not None')
+        if fh is not None:
             self.__file = fh
             self.__closefile = False
             self.filename = fh.name
@@ -135,25 +145,35 @@ class Ar:
         data section. The end of such a filename is indicated with a trailing '/'.
         Another special file is the '/' which contains the symbol lookup table.
         """
+
+        # read extended header with long file names and then only seek into the right offsets
+        ext_fnhdr_data = None
+        if self.ext_fnhdr:
+            self.__file.seek(self.ext_fnhdr.dataoff, os.SEEK_SET)
+            ext_fnhdr_data = self.__file.read(self.ext_fnhdr.size)
+
         for h in self.hdrs:
             if h.file == b'/':
                 continue
-            # remove slashes which are appended by ar
-            h.file = h.file.rstrip(b'/')
+
+            if h.file.endswith(b"/"):
+                # regular file name
+                h.file = h.file[:-1]
+                continue
+
             if not h.file.startswith(b'/'):
                 continue
-            # handle long filename
-            off = int(h.file[1:len(h.file)])
-            start = self.ext_fnhdr.dataoff + off
-            self.__file.seek(start, os.SEEK_SET)
-            # XXX: is it safe to read all the data in one chunk? I assume the '//' data section
-            #      won't be too large
-            data = self.__file.read(self.ext_fnhdr.size)
-            end = data.find(b'/')
-            if end != -1:
-                h.file = data[0:end]
-            else:
+
+            # long file name
+            assert h.file[0:1] == b"/"
+            assert ext_fnhdr_data is not None
+            start = int(h.file[1:])
+            end = ext_fnhdr_data.find(b'/', start)
+
+            if end == -1:
                 raise ArError(b'//', 'invalid data section - trailing slash (off: %d)' % start)
+
+            h.file = ext_fnhdr_data[start:end]
 
     def _get_file(self, hdr):
         self.__file.seek(hdr.dataoff, os.SEEK_SET)
@@ -171,7 +191,7 @@ class Ar:
         if data != b'!<arch>':
             raise ArError(self.filename, 'no ar archive')
         pos = 8
-        while (len(data) != 0):
+        while len(data) != 0:
             self.__file.seek(pos, os.SEEK_SET)
             data = self.__file.read(self.hdr_len)
             if not data:
@@ -188,7 +208,10 @@ class Ar:
             pos += hdr.size + (hdr.size & 1)
         self._fixupFilenames()
 
-    def get_file(self, fn):
+    def get_file(self, fn: Union[str, bytes]):
+        # accept str for better user experience
+        if isinstance(fn, str):
+            fn = fn.encode("utf-8")
         for h in self.hdrs:
             if h.file == fn:
                 return self._get_file(h)
