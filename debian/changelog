@@ -1,3 +1,9 @@
+osc (1.15.1-1deepin1) unstable; urgency=medium
+
+  * BuildArch: Add loong64 and sw64
+
+ -- Tianyu Chen <sweetyfish@deepin.org>  Thu, 21 Aug 2025 22:15:43 +0800
+
 osc (1.15.1-1) unstable; urgency=medium
 
   * New upstream version 1.15.1
