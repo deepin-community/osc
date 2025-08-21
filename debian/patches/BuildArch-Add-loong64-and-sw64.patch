@@ -1,0 +1,28 @@
+From: Tianyu Chen <sweetyfish@deepin.org>
+Date: Thu, 21 Aug 2025 22:14:04 +0800
+Subject: BuildArch: Add loong64 and sw64
+
+---
+ osc/obs_api/enums.py | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/osc/obs_api/enums.py b/osc/obs_api/enums.py
+index d777d4e..3d17b2a 100644
+--- a/osc/obs_api/enums.py
++++ b/osc/obs_api/enums.py
+@@ -34,6 +34,7 @@ class BuildArch(str, Enum):
+     ATHLON = "athlon"
+     IA64 = "ia64"
+     K1OM = "k1om"
++    LOONG64 = "loong64"
+     LOONGARCH64 = "loongarch64"
+     MIPS = "mips"
+     MIPSEL = "mipsel"
+@@ -54,6 +55,7 @@ class BuildArch(str, Enum):
+     SPARCV8 = "sparcv8"
+     SPARCV9 = "sparcv9"
+     SPARCV9V = "sparcv9v"
++    SW64 = "sw64"
+     X86_64 = "x86_64"
+     LOCAL = "local"
+ 
